@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.rbc-calendar {
+  font-family: inherit;
+}
+
+.rbc-event {
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+.rbc-today {
+  background-color: rgb(224 242 254 / 0.5);
+}
+
+.rbc-off-range-bg {
+  background-color: rgb(241 245 249);
+}
