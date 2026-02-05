@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { completions } from '../api';
 
 export default function CompleteTaskModal({
@@ -12,13 +12,18 @@ export default function CompleteTaskModal({
   const hasExisting = existingCompletions.length > 0;
 
   // Prefill selected users: existing completions OR default currentUser
-  const defaultUserIds = hasExisting
-    ? existingCompletions.map((c) => c.user_id)
-    : currentUser
-    ? [currentUser.id]
-    : users.length > 0
-    ? [users[0].id]
-    : [];
+  const defaultUserIds = useMemo(() => {
+    if (hasExisting) {
+      return existingCompletions.map((c) => c.user_id);
+    }
+    if (currentUser) {
+      return [currentUser.id];
+    }
+    if (users.length > 0) {
+      return [users[0].id];
+    }
+    return [];
+  }, [hasExisting, existingCompletions, currentUser, users]);
 
   const [selectedUserIds, setSelectedUserIds] = useState(defaultUserIds);
   const [stars, setStars] = useState(
@@ -34,8 +39,11 @@ export default function CompleteTaskModal({
     if (hasExisting) {
       setStars(existingCompletions[0].stars_earned);
       setNotes(existingCompletions[0].notes || '');
+    } else {
+      setStars(task?.default_stars ?? 1);
+      setNotes('');
     }
-  }, [existingCompletions, currentUser, users]);
+  }, [existingCompletions, currentUser, users, hasExisting, task, defaultUserIds]);
 
   const handleUserChange = (e) => {
     const options = Array.from(e.target.selectedOptions).map((opt) => parseInt(opt.value));

@@ -211,8 +211,8 @@ app.get('/api/completions', authMiddleware, (req, res) => {
   const params = [];
   if (task_id) { sql += ' AND tc.task_id = ?'; params.push(task_id); }
   if (user_id) { sql += ' AND tc.user_id = ?'; params.push(user_id); }
-  if (start_date) { sql += ' AND date(tc.completed_at) >= ?'; params.push(start_date); }
-  if (end_date) { sql += ' AND date(tc.completed_at) <= ?'; params.push(end_date); }
+  if (start_date) { sql += ' AND datetime(tc.completed_at) >= datetime(?)'; params.push(start_date); }
+  if (end_date) { sql += ' AND datetime(tc.completed_at) <= datetime(?)'; params.push(end_date); }
   sql += ' ORDER BY tc.completed_at DESC';
 
   const completions = db.prepare(sql).all(...params);
