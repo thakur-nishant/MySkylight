@@ -107,11 +107,20 @@ export default function CalendarPage() {
   /** -----------------------------
    * Completed tasks lookup
    * ----------------------------- */
+  const parseCompletionDate = useCallback((completion) => {
+    if (!completion?.completed_at) return null;
+    const normalized = completion.completed_at.replace(' ', 'T');
+    const utcDate = new Date(`${normalized}Z`);
+    return Number.isNaN(utcDate.getTime()) ? null : utcDate;
+  }, []);
+
   const isCompletionInPeriod = useCallback(
     (task, completion) => {
       if (!task || !completion) return false;
       const referenceDate = currentDate ?? todayPST();
-      const completedDate = toPST(completion.completed_at);
+      const completionUtc = parseCompletionDate(completion);
+      if (!completionUtc) return false;
+      const completedDate = toPST(completionUtc);
 
       if (task.task_type === 'daily') {
         return isSameDay(completedDate, referenceDate);
@@ -128,7 +137,7 @@ export default function CalendarPage() {
       // one-time & event tasks
       return true;
     },
-    [currentDate]
+    [currentDate, parseCompletionDate]
   );
 
   const completedTaskIds = useMemo(() => {
