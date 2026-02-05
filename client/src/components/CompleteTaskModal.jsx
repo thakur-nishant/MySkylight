@@ -34,8 +34,11 @@ export default function CompleteTaskModal({
     if (hasExisting) {
       setStars(existingCompletions[0].stars_earned);
       setNotes(existingCompletions[0].notes || '');
+    } else {
+      setStars(task?.default_stars ?? 1);
+      setNotes('');
     }
-  }, [existingCompletions, currentUser, users]);
+  }, [existingCompletions, currentUser, users, hasExisting, task, defaultUserIds]);
 
   const handleUserChange = (e) => {
     const options = Array.from(e.target.selectedOptions).map((opt) => parseInt(opt.value));
