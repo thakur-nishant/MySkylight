@@ -27,6 +27,7 @@ export default function CalendarPage() {
   const [selectedTask, setSelectedTask] = useState(null);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [modalDate, setModalDate] = useState(null);
+  const [currentDate, setCurrentDate] = useState(() => todayPST());
   const { user: currentUser } = useAuth();
 
   /** -----------------------------
@@ -71,7 +72,7 @@ export default function CalendarPage() {
    * Completed tasks lookup
    * ----------------------------- */
   const completedTaskIds = useMemo(() => {
-    const today = todayPST();
+    const referenceDate = currentDate;
   
     return new Set(
       completionList
@@ -82,15 +83,15 @@ export default function CalendarPage() {
           const completedDate = toPST(c.completed_at);
   
           if (task.task_type === 'daily') {
-            return isSameDay(completedDate, today);
+            return isSameDay(completedDate, referenceDate);
           }
   
           if (task.task_type === 'weekly') {
-            return isSameWeek(completedDate, today, { weekStartsOn: 0 });
+            return isSameWeek(completedDate, referenceDate, { weekStartsOn: 0 });
           }
   
           if (task.task_type === 'monthly') {
-            return isSameMonth(completedDate, today);
+            return isSameMonth(completedDate, referenceDate);
           }
   
           // one-time & event tasks
@@ -98,7 +99,7 @@ export default function CalendarPage() {
         })
         .map((c) => c.task_id)
     );
-  }, [completionList, taskList]);
+  }, [completionList, taskList, currentDate]);
   
 
   /** -----------------------------
@@ -181,6 +182,7 @@ export default function CalendarPage() {
           endAccessor="end"
           style={{ height: 500 }}
           onSelectEvent={(e) => handleSelectTask(e.task)}
+          onNavigate={(date) => setCurrentDate(date)}
           onSelectSlot={(slotInfo) => {
             setSelectedTask(null);
             setModalDate(slotInfo.start);
