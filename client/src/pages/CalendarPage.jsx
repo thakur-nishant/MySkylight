@@ -19,7 +19,7 @@ import { tasks as tasksApi, completions, users as usersApi } from '../api';
 import CompleteTaskModal from '../components/CompleteTaskModal';
 import TaskModal from '../components/TaskModal';
 import { CheckCircle, Circle } from 'lucide-react';
-import { toPST, todayPST } from '../utils/dateUtils';
+import { toPST, todayPST, formatDatePST, zonedTimeToUtc } from '../utils/dateUtils';
 
 const localizer = dateFnsLocalizer({
   format,
@@ -48,10 +48,15 @@ export default function CalendarPage() {
     const weekStart = startOfWeek(referenceDate, { weekStartsOn: 0 });
     const monthStart = startOfMonth(referenceDate);
     const rangeStart = weekStart < monthStart ? weekStart : monthStart;
+    const rangeStartPst = formatDatePST(rangeStart);
+    const rangeEndPst = formatDatePST(referenceDate);
+    const rangeStartUtc = zonedTimeToUtc(`${rangeStartPst}T00:00:00`);
+    const rangeEndUtc = zonedTimeToUtc(`${rangeEndPst}T23:59:59`);
+    const toUtcSql = (date) => date.toISOString().slice(0, 19).replace('T', ' ');
 
     return {
-      start: format(rangeStart, 'yyyy-MM-dd'),
-      end: format(referenceDate, 'yyyy-MM-dd'),
+      start: toUtcSql(rangeStartUtc),
+      end: toUtcSql(rangeEndUtc),
     };
   }, [currentDate]);
 

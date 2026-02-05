@@ -17,8 +17,8 @@ export function toZonedTime(date) {
  * ---------------------------------------- */
 export function zonedTimeToUtc(dateStr) {
   if (!dateStr) return null;
-  const utcDate = fromZonedTime(`${dateStr}T00:00:00`, TIMEZONE);
-  return format(utcDate, 'yyyy-MM-dd');
+  const utcDate = tz.zonedTimeToUtc(dateStr, TIMEZONE);
+  return utcDate;
 }
 
 /* ----------------------------------------
