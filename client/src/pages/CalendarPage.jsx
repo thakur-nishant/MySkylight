@@ -1,6 +1,6 @@
-import React, { useMemo, useState, useCallback, useContext } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
-import { format, parse, startOfWeek, getDay, isSameDay, isSameWeek, isSameMonth, parseISO } from 'date-fns';
+import { format, parse, startOfWeek, getDay, isSameDay, isSameWeek, isSameMonth } from 'date-fns';
 import enUS from 'date-fns/locale/en-US';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { useAuth } from '../context/AuthContext';
@@ -34,7 +34,22 @@ export default function CalendarPage() {
    * Stable fetchers
    * ----------------------------- */
   const fetchTasks = useCallback(() => tasksApi.list(), []);
-  const fetchCompletions = useCallback(() => completions.list(), []);
+  const completionRange = useMemo(() => {
+    const referenceDate = currentDate ?? todayPST();
+    return {
+      start: format(startOfWeek(referenceDate, { weekStartsOn: 0 }), 'yyyy-MM-dd'),
+      end: format(referenceDate, 'yyyy-MM-dd'),
+    };
+  }, [currentDate]);
+
+  const fetchCompletions = useCallback(
+    () =>
+      completions.list({
+        start_date: completionRange.start,
+        end_date: completionRange.end,
+      }),
+    [completionRange.start, completionRange.end]
+  );
   const fetchUsers = useCallback(() => usersApi.list(), []);
 
   /** -----------------------------
@@ -43,7 +58,10 @@ export default function CalendarPage() {
   const { data: allTaskList, refetch: refetchTasks } = useQuery(['tasks-all'], fetchTasks);
   const taskList = Array.isArray(allTaskList) ? allTaskList : [];
 
-  const { data: allCompletionList, refetch: refetchCompletions } = useQuery(['completions-all'], fetchCompletions);
+  const { data: allCompletionList, refetch: refetchCompletions } = useQuery(
+    ['completions-all', completionRange.start, completionRange.end],
+    fetchCompletions
+  );
   const completionList = Array.isArray(allCompletionList) ? allCompletionList : [];
 
   const { data: allUsers } = useQuery(['users-all'], fetchUsers);
@@ -182,7 +200,7 @@ export default function CalendarPage() {
           endAccessor="end"
           style={{ height: 500 }}
           onSelectEvent={(e) => handleSelectTask(e.task)}
-          onNavigate={(date) => setCurrentDate(date)}
+          onNavigate={(date) => setCurrentDate(toPST(date))}
           onSelectSlot={(slotInfo) => {
             setSelectedTask(null);
             setModalDate(slotInfo.start);
