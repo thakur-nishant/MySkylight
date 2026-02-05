@@ -45,8 +45,12 @@ export default function CalendarPage() {
   const fetchTasks = useCallback(() => tasksApi.list(), []);
   const completionRange = useMemo(() => {
     const referenceDate = currentDate ?? todayPST();
+    const weekStart = startOfWeek(referenceDate, { weekStartsOn: 0 });
+    const monthStart = startOfMonth(referenceDate);
+    const rangeStart = weekStart < monthStart ? weekStart : monthStart;
+
     return {
-      start: format(startOfMonth(referenceDate), 'yyyy-MM-dd'),
+      start: format(rangeStart, 'yyyy-MM-dd'),
       end: format(referenceDate, 'yyyy-MM-dd'),
     };
   }, [currentDate]);

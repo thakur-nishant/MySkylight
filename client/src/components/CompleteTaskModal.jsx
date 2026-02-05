@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { completions } from '../api';
 
 export default function CompleteTaskModal({
@@ -12,13 +12,18 @@ export default function CompleteTaskModal({
   const hasExisting = existingCompletions.length > 0;
 
   // Prefill selected users: existing completions OR default currentUser
-  const defaultUserIds = hasExisting
-    ? existingCompletions.map((c) => c.user_id)
-    : currentUser
-    ? [currentUser.id]
-    : users.length > 0
-    ? [users[0].id]
-    : [];
+  const defaultUserIds = useMemo(() => {
+    if (hasExisting) {
+      return existingCompletions.map((c) => c.user_id);
+    }
+    if (currentUser) {
+      return [currentUser.id];
+    }
+    if (users.length > 0) {
+      return [users[0].id];
+    }
+    return [];
+  }, [hasExisting, existingCompletions, currentUser, users]);
 
   const [selectedUserIds, setSelectedUserIds] = useState(defaultUserIds);
   const [stars, setStars] = useState(
