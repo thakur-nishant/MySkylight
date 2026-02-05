@@ -1,6 +1,15 @@
 import React, { useMemo, useState, useCallback } from 'react';
 import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
-import { format, parse, startOfWeek, getDay, isSameDay, isSameWeek, isSameMonth } from 'date-fns';
+import {
+  format,
+  parse,
+  startOfWeek,
+  startOfMonth,
+  getDay,
+  isSameDay,
+  isSameWeek,
+  isSameMonth,
+} from 'date-fns';
 import enUS from 'date-fns/locale/en-US';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { useAuth } from '../context/AuthContext';
@@ -10,7 +19,7 @@ import { tasks as tasksApi, completions, users as usersApi } from '../api';
 import CompleteTaskModal from '../components/CompleteTaskModal';
 import TaskModal from '../components/TaskModal';
 import { CheckCircle, Circle } from 'lucide-react';
-import { toPST, todayPST } from '../utils/dateUtils';
+import { toPST, todayPST, formatDatePST, zonedTimeToUtc } from '../utils/dateUtils';
 
 const localizer = dateFnsLocalizer({
   format,
@@ -36,9 +45,18 @@ export default function CalendarPage() {
   const fetchTasks = useCallback(() => tasksApi.list(), []);
   const completionRange = useMemo(() => {
     const referenceDate = currentDate ?? todayPST();
+    const weekStart = startOfWeek(referenceDate, { weekStartsOn: 0 });
+    const monthStart = startOfMonth(referenceDate);
+    const rangeStart = weekStart < monthStart ? weekStart : monthStart;
+    const rangeStartPst = formatDatePST(rangeStart);
+    const rangeEndPst = formatDatePST(referenceDate);
+    const rangeStartUtc = zonedTimeToUtc(`${rangeStartPst}T00:00:00`);
+    const rangeEndUtc = zonedTimeToUtc(`${rangeEndPst}T23:59:59`);
+    const toUtcSql = (date) => date.toISOString().slice(0, 19).replace('T', ' ');
+
     return {
-      start: format(startOfWeek(referenceDate, { weekStartsOn: 0 }), 'yyyy-MM-dd'),
-      end: format(referenceDate, 'yyyy-MM-dd'),
+      start: toUtcSql(rangeStartUtc),
+      end: toUtcSql(rangeEndUtc),
     };
   }, [currentDate]);
 
@@ -89,35 +107,49 @@ export default function CalendarPage() {
   /** -----------------------------
    * Completed tasks lookup
    * ----------------------------- */
+  const parseCompletionDate = useCallback((completion) => {
+    if (!completion?.completed_at) return null;
+    const normalized = completion.completed_at.replace(' ', 'T');
+    const utcDate = new Date(`${normalized}Z`);
+    return Number.isNaN(utcDate.getTime()) ? null : utcDate;
+  }, []);
+
+  const isCompletionInPeriod = useCallback(
+    (task, completion) => {
+      if (!task || !completion) return false;
+      const referenceDate = currentDate ?? todayPST();
+      const completionUtc = parseCompletionDate(completion);
+      if (!completionUtc) return false;
+      const completedDate = toPST(completionUtc);
+
+      if (task.task_type === 'daily') {
+        return isSameDay(completedDate, referenceDate);
+      }
+
+      if (task.task_type === 'weekly') {
+        return isSameWeek(completedDate, referenceDate, { weekStartsOn: 0 });
+      }
+
+      if (task.task_type === 'monthly') {
+        return isSameMonth(completedDate, referenceDate);
+      }
+
+      // one-time & event tasks
+      return true;
+    },
+    [currentDate, parseCompletionDate]
+  );
+
   const completedTaskIds = useMemo(() => {
-    const referenceDate = currentDate;
-  
     return new Set(
       completionList
         .filter((c) => {
           const task = taskList.find((t) => t.id === c.task_id);
-          if (!task) return false;
-  
-          const completedDate = toPST(c.completed_at);
-  
-          if (task.task_type === 'daily') {
-            return isSameDay(completedDate, referenceDate);
-          }
-  
-          if (task.task_type === 'weekly') {
-            return isSameWeek(completedDate, referenceDate, { weekStartsOn: 0 });
-          }
-  
-          if (task.task_type === 'monthly') {
-            return isSameMonth(completedDate, referenceDate);
-          }
-  
-          // one-time & event tasks
-          return true;
+          return isCompletionInPeriod(task, c);
         })
         .map((c) => c.task_id)
     );
-  }, [completionList, taskList, currentDate]);
+  }, [completionList, taskList, isCompletionInPeriod]);
   
 
   /** -----------------------------
@@ -125,9 +157,11 @@ export default function CalendarPage() {
    * ----------------------------- */
   const selectedCompletion = useMemo(() => {
     if (!selectedTask) return null;
-    const matches = completionList.filter((c) => c.task_id === selectedTask.id);
+    const matches = completionList.filter(
+      (c) => c.task_id === selectedTask.id && isCompletionInPeriod(selectedTask, c)
+    );
     return matches.length > 0 ? matches : [];
-  }, [selectedTask, completionList]);
+  }, [selectedTask, completionList, isCompletionInPeriod]);
 
   /** -----------------------------
    * Grouped task panels
