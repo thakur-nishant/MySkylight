@@ -59,6 +59,7 @@ app.get('/api/tasks', authMiddleware, (req, res) => {
     SELECT t.*, 
       (SELECT json_group_array(user_id) FROM task_assignments WHERE task_id = t.id) as assigned_user_ids
     FROM tasks t
+    WHERE t.is_personal = 0
     ORDER BY t.task_type, t.title
   `;
   const tasks = db.prepare(sql).all();
@@ -67,7 +68,8 @@ app.get('/api/tasks', authMiddleware, (req, res) => {
     ...t,
     assigned_user_ids: t.assigned_user_ids ? JSON.parse(t.assigned_user_ids) : [],
     is_group_task: !!t.is_group_task,
-    is_all_day: t.is_all_day !== 0
+    is_all_day: t.is_all_day !== 0,
+    is_personal: !!t.is_personal
   }));
 
   if (type) filtered = filtered.filter(t => t.task_type === type);
@@ -86,12 +88,12 @@ app.get('/api/tasks', authMiddleware, (req, res) => {
 app.post('/api/tasks', authMiddleware, (req, res) => {
   const {
     title, description, task_type, recurrence_pattern, default_stars,
-    is_group_task, group_id, due_date, start_time, end_time, is_all_day, assigned_user_ids
+    is_group_task, group_id, due_date, start_time, end_time, is_all_day, is_personal, assigned_user_ids
   } = req.body;
 
   const result = db.prepare(`
-    INSERT INTO tasks (title, description, task_type, recurrence_pattern, default_stars, is_group_task, group_id, due_date, start_time, end_time, is_all_day, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO tasks (title, description, task_type, recurrence_pattern, default_stars, is_group_task, group_id, due_date, start_time, end_time, is_all_day, is_personal, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     title,
     description || null,
@@ -104,6 +106,7 @@ app.post('/api/tasks', authMiddleware, (req, res) => {
     start_time || null,
     end_time || null,
     is_all_day !== false ? 1 : 0,
+    is_personal ? 1 : 0,
     req.user.id
   );
 
@@ -123,6 +126,7 @@ app.post('/api/tasks', authMiddleware, (req, res) => {
   task.assigned_user_ids = task.assigned_user_ids ? JSON.parse(task.assigned_user_ids) : [];
   task.is_group_task = !!task.is_group_task;
   task.is_all_day = task.is_all_day !== 0;
+  task.is_personal = !!task.is_personal;
 
   res.status(201).json(task);
 });
@@ -142,6 +146,7 @@ app.patch('/api/tasks/:id', authMiddleware, (req, res) => {
     start_time,
     end_time,
     is_all_day,
+    is_personal,
     assigned_user_ids
   } = req.body;
 
@@ -162,7 +167,8 @@ app.patch('/api/tasks/:id', authMiddleware, (req, res) => {
       due_date = ?,
       start_time = ?,
       end_time = ?,
-      is_all_day = COALESCE(?, is_all_day)
+      is_all_day = COALESCE(?, is_all_day),
+      is_personal = COALESCE(?, is_personal)
     WHERE id = ?
   `).run(
     safe(title),
@@ -176,6 +182,7 @@ app.patch('/api/tasks/:id', authMiddleware, (req, res) => {
     safe(start_time),
     safe(end_time),
     is_all_day !== undefined ? (is_all_day ? 1 : 0) : null,
+    is_personal !== undefined ? (is_personal ? 1 : 0) : null,
     id
   );
 
@@ -206,7 +213,7 @@ app.get('/api/completions', authMiddleware, (req, res) => {
     FROM task_completions tc
     JOIN tasks t ON t.id = tc.task_id
     LEFT JOIN users u ON u.id = tc.user_id
-    WHERE 1=1
+    WHERE t.is_personal = 0
   `;
   const params = [];
   if (task_id) { sql += ' AND tc.task_id = ?'; params.push(task_id); }
@@ -315,7 +322,7 @@ app.get('/api/tracker/weekly', authMiddleware, (req, res) => {
     FROM tasks t
     WHERE t.created_by = ?
       AND t.task_type = 'one-time'
-      AND t.recurrence_pattern = 'personal_tracker'
+      AND t.is_personal = 1
       AND t.due_date BETWEEN ? AND ?
     ORDER BY t.due_date, t.created_at
   `).all(req.user.id, req.user.id, weekStart, weekEnd).map((t) => ({ ...t, completed: !!t.completed }));
@@ -343,8 +350,8 @@ app.post('/api/tracker/tasks', authMiddleware, (req, res) => {
   if (!title || !due_date) return res.status(400).json({ error: 'title and due_date are required' });
 
   const result = db.prepare(`
-    INSERT INTO tasks (title, task_type, recurrence_pattern, due_date, created_by, is_all_day)
-    VALUES (?, 'one-time', 'personal_tracker', ?, ?, 1)
+    INSERT INTO tasks (title, task_type, recurrence_pattern, due_date, created_by, is_all_day, is_personal)
+    VALUES (?, 'one-time', 'personal_tracker', ?, ?, 1, 1)
   `).run(title, due_date, req.user.id);
 
   const task = db.prepare('SELECT id, title, due_date FROM tasks WHERE id = ?').get(result.lastInsertRowid);
@@ -356,7 +363,7 @@ app.patch('/api/tracker/tasks/:id', authMiddleware, (req, res) => {
   const { title, due_date } = req.body;
   const task = db.prepare(`
     SELECT id FROM tasks
-    WHERE id = ? AND created_by = ? AND recurrence_pattern = 'personal_tracker'
+    WHERE id = ? AND created_by = ? AND is_personal = 1
   `).get(id, req.user.id);
 
   if (!task) return res.status(404).json({ error: 'Task not found' });
@@ -374,7 +381,7 @@ app.patch('/api/tracker/tasks/:id', authMiddleware, (req, res) => {
 app.delete('/api/tracker/tasks/:id', authMiddleware, (req, res) => {
   const result = db.prepare(`
     DELETE FROM tasks
-    WHERE id = ? AND created_by = ? AND recurrence_pattern = 'personal_tracker'
+    WHERE id = ? AND created_by = ? AND is_personal = 1
   `).run(req.params.id, req.user.id);
 
   if (!result.changes) return res.status(404).json({ error: 'Task not found' });
@@ -388,7 +395,7 @@ app.patch('/api/tracker/tasks/:id/toggle', authMiddleware, (req, res) => {
 
   const task = db.prepare(`
     SELECT id, due_date, default_stars FROM tasks
-    WHERE id = ? AND created_by = ? AND recurrence_pattern = 'personal_tracker'
+    WHERE id = ? AND created_by = ? AND is_personal = 1
   `).get(id, req.user.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
 
@@ -595,7 +602,7 @@ app.get('/api/calendar/events', authMiddleware, (req, res) => {
   const tasks = db.prepare(`
     SELECT id, title, description, task_type, due_date, start_time, end_time, is_all_day, default_stars
     FROM tasks
-    WHERE due_date IS NOT NULL AND due_date >= ? AND due_date <= ?
+    WHERE is_personal = 0 AND due_date IS NOT NULL AND due_date >= ? AND due_date <= ?
   `).all(start?.slice(0, 10) || '1900-01-01', end?.slice(0, 10) || '2100-12-31');
 
   const events = tasks.map(t => ({

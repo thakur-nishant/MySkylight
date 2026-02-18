@@ -107,6 +107,7 @@ db.exec(`
     start_time TEXT,
     end_time TEXT,
     is_all_day INTEGER DEFAULT 1,
+    is_personal INTEGER NOT NULL DEFAULT 0,
     created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -131,6 +132,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_task_completions_date ON task_completions(completed_at);
   CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date);
   CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(task_type);
+  CREATE INDEX IF NOT EXISTS idx_tasks_personal ON tasks(is_personal);
 
   CREATE TABLE IF NOT EXISTS habits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,6 +156,20 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_habit_logs_habit ON habit_logs(habit_id);
   CREATE INDEX IF NOT EXISTS idx_habit_logs_date ON habit_logs(date);
 `);
+
+// Backward-compatible migration for existing databases.
+const taskColumns = db.prepare('PRAGMA table_info(tasks)').all();
+const hasIsPersonalColumn = taskColumns.some((column) => column.name === 'is_personal');
+if (!hasIsPersonalColumn) {
+  db.exec('ALTER TABLE tasks ADD COLUMN is_personal INTEGER NOT NULL DEFAULT 0');
+}
+
+// Keep historical personal tracker tasks categorized as personal.
+db.prepare(`
+  UPDATE tasks
+  SET is_personal = 1
+  WHERE recurrence_pattern = 'personal_tracker'
+`).run();
 
 // Seed default data if empty
 const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get();
