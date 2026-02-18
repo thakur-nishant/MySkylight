@@ -85,7 +85,7 @@ export default function PersonalTrackerPage() {
           <WeeklyBarChart days={dailySummaries} />
         </div>
         <div className="flex justify-center items-center">
-          <RingProgress value={weeklyPercent} size={140} label="Weekly completion" />
+          <RingProgress value={weeklyPercent} size={188} stroke={16} label="Weekly completion" />
         </div>
       </section>
 
