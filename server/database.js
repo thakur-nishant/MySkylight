@@ -131,6 +131,28 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_task_completions_date ON task_completions(completed_at);
   CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date);
   CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(task_type);
+
+  CREATE TABLE IF NOT EXISTS habits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS habit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    habit_id INTEGER NOT NULL REFERENCES habits(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    completed INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(habit_id, date)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_habits_user ON habits(user_id);
+  CREATE INDEX IF NOT EXISTS idx_habit_logs_habit ON habit_logs(habit_id);
+  CREATE INDEX IF NOT EXISTS idx_habit_logs_date ON habit_logs(date);
 `);
 
 // Seed default data if empty
