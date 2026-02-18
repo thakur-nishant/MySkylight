@@ -273,20 +273,8 @@ app.delete('/api/completions/:id', authMiddleware, (req, res) => {
   res.status(204).send();
 });
 
-function parseDateInput(dateInput = new Date()) {
-  if (typeof dateInput === 'string') {
-    const dateOnlyMatch = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (dateOnlyMatch) {
-      const [, year, month, day] = dateOnlyMatch;
-      return new Date(Number(year), Number(month) - 1, Number(day));
-    }
-  }
-
-  return new Date(dateInput);
-}
-
 function getSunday(dateInput = new Date()) {
-  const date = parseDateInput(dateInput);
+  const date = new Date(dateInput);
   const day = date.getDay();
   const sunday = new Date(date);
   sunday.setDate(date.getDate() - day);

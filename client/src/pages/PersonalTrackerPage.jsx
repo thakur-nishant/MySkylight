@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { format, addDays, startOfWeek, parseISO } from 'date-fns';
 import { tracker } from '../api';
 import { useQuery } from '../hooks/useQuery';
@@ -25,13 +25,18 @@ export default function PersonalTrackerPage() {
   const [newHabit, setNewHabit] = useState('');
   const [taskOverrides, setTaskOverrides] = useState({});
   const [habitOverrides, setHabitOverrides] = useState({});
+  const [trackerData, setTrackerData] = useState(null);
 
   const { data, loading, refetch } = useQuery(['tracker', weekStart], () => tracker.weekly({ week_start: weekStart }));
 
+  useEffect(() => {
+    if (data) setTrackerData(data);
+  }, [data]);
+
   const weekDays = useMemo(() => getWeekDays(weekStart), [weekStart]);
-  const tasks = data?.tasks || [];
-  const habits = data?.habits || [];
-  const habitLogs = data?.habitLogs || [];
+  const tasks = trackerData?.tasks || [];
+  const habits = trackerData?.habits || [];
+  const habitLogs = trackerData?.habitLogs || [];
 
   const isTaskCompleted = (task) => taskOverrides[task.id] ?? !!task.completed;
   const habitCompleted = (habitId, date) => {
@@ -53,19 +58,19 @@ export default function PersonalTrackerPage() {
     return total ? (completed / total) * 100 : 0;
   })();
 
-  const runOptimistic = async (fn) => {
+  const runOptimistic = async (fn, rollback) => {
     try {
       await fn();
     } catch (error) {
       console.error(error);
+      if (rollback) rollback();
     } finally {
-      refetch();
       setTaskOverrides({});
       setHabitOverrides({});
     }
   };
 
-  if (loading) return <div className="p-6">Loading tracker...</div>;
+  if (loading || !trackerData) return <div className="p-6">Loading tracker...</div>;
 
   return (
     <div className="p-6 space-y-6">
@@ -141,8 +146,35 @@ export default function PersonalTrackerPage() {
                         checked={habitCompleted(habit.id, d.date)}
                         onChange={(e) => {
                           const checked = e.target.checked;
+                          const habitLogIndex = habitLogs.findIndex((log) => log.habit_id === habit.id && log.date === d.date);
+                          const prevValue = habitLogIndex >= 0 ? habitLogs[habitLogIndex].completed : false;
+
+                          setTrackerData((prev) => {
+                            if (!prev) return prev;
+                            const nextLogs = [...(prev.habitLogs || [])];
+                            if (habitLogIndex >= 0) {
+                              nextLogs[habitLogIndex] = { ...nextLogs[habitLogIndex], completed: checked };
+                            } else {
+                              nextLogs.push({ habit_id: habit.id, date: d.date, completed: checked });
+                            }
+                            return { ...prev, habitLogs: nextLogs };
+                          });
+
                           setHabitOverrides((prev) => ({ ...prev, [`${habit.id}-${d.date}`]: checked }));
-                          void runOptimistic(() => tracker.toggleHabit(habit.id, { date: d.date, completed: checked }));
+                          void runOptimistic(
+                            () => tracker.toggleHabit(habit.id, { date: d.date, completed: checked }),
+                            () => {
+                              setTrackerData((prev) => {
+                                if (!prev) return prev;
+                                const nextLogs = [...(prev.habitLogs || [])];
+                                const idx = nextLogs.findIndex((log) => log.habit_id === habit.id && log.date === d.date);
+                                if (idx >= 0) {
+                                  nextLogs[idx] = { ...nextLogs[idx], completed: prevValue };
+                                }
+                                return { ...prev, habitLogs: nextLogs };
+                              });
+                            }
+                          );
                         }}
                       />
                     </td>
@@ -183,8 +215,23 @@ export default function PersonalTrackerPage() {
                     checked={isTaskCompleted(task)}
                     onChange={(e) => {
                       const checked = e.target.checked;
+                      const prevValue = !!task.completed;
+                      setTrackerData((prev) => {
+                        if (!prev) return prev;
+                        const nextTasks = (prev.tasks || []).map((t) => (t.id === task.id ? { ...t, completed: checked } : t));
+                        return { ...prev, tasks: nextTasks };
+                      });
                       setTaskOverrides((prev) => ({ ...prev, [task.id]: checked }));
-                      void runOptimistic(() => tracker.toggleTask(task.id, { date: day.date, completed: checked }));
+                      void runOptimistic(
+                        () => tracker.toggleTask(task.id, { date: day.date, completed: checked }),
+                        () => {
+                          setTrackerData((prev) => {
+                            if (!prev) return prev;
+                            const nextTasks = (prev.tasks || []).map((t) => (t.id === task.id ? { ...t, completed: prevValue } : t));
+                            return { ...prev, tasks: nextTasks };
+                          });
+                        }
+                      );
                     }}
                   />
                   <input
