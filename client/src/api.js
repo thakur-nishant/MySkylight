@@ -133,3 +133,17 @@ export const calendar = {
     return Array.isArray(data) ? data : [];
   },
 };
+
+export const tracker = {
+  weekly: (params) => api('/tracker/weekly' + (params ? '?' + new URLSearchParams(params).toString() : '')),
+
+  createTask: (data) => api('/tracker/tasks', { method: 'POST', body: JSON.stringify(data) }),
+  updateTask: (id, data) => api(`/tracker/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteTask: (id) => api(`/tracker/tasks/${id}`, { method: 'DELETE' }),
+  toggleTask: (id, data) => api(`/tracker/tasks/${id}/toggle`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  createHabit: (data) => api('/tracker/habits', { method: 'POST', body: JSON.stringify(data) }),
+  updateHabit: (id, data) => api(`/tracker/habits/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteHabit: (id) => api(`/tracker/habits/${id}`, { method: 'DELETE' }),
+  toggleHabit: (id, data) => api(`/tracker/habits/${id}/toggle`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
