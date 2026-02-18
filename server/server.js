@@ -287,7 +287,13 @@ app.delete('/api/completions/:id', authMiddleware, (req, res) => {
 });
 
 function getSunday(dateInput = new Date()) {
-  const date = new Date(dateInput);
+  const date = (() => {
+    if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+      const [year, month, day] = dateInput.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    }
+    return new Date(dateInput);
+  })();
   const day = date.getDay();
   const sunday = new Date(date);
   sunday.setDate(date.getDate() - day);
