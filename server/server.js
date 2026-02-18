@@ -462,12 +462,22 @@ app.patch('/api/tracker/habits/:id/toggle', authMiddleware, (req, res) => {
   const habit = db.prepare('SELECT id FROM habits WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
   if (!habit) return res.status(404).json({ error: 'Habit not found' });
 
-  db.prepare(`
-    INSERT INTO habit_logs (habit_id, date, completed)
-    VALUES (?, ?, ?)
-    ON CONFLICT(habit_id, date)
-    DO UPDATE SET completed = excluded.completed, updated_at = CURRENT_TIMESTAMP
-  `).run(req.params.id, date, completed ? 1 : 0);
+  const value = completed ? 1 : 0;
+
+  // Backward-compatible upsert for older databases that may not have
+  // a UNIQUE(habit_id, date) constraint in habit_logs.
+  const updated = db.prepare(`
+    UPDATE habit_logs
+    SET completed = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE habit_id = ? AND date = ?
+  `).run(value, req.params.id, date);
+
+  if (!updated.changes) {
+    db.prepare(`
+      INSERT INTO habit_logs (habit_id, date, completed)
+      VALUES (?, ?, ?)
+    `).run(req.params.id, date, value);
+  }
 
   res.json({ success: true });
 });
