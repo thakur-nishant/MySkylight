@@ -132,7 +132,6 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_task_completions_date ON task_completions(completed_at);
   CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date);
   CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(task_type);
-  CREATE INDEX IF NOT EXISTS idx_tasks_personal ON tasks(is_personal);
 
   CREATE TABLE IF NOT EXISTS habits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -158,11 +157,18 @@ db.exec(`
 `);
 
 // Backward-compatible migration for existing databases.
+const userColumns = db.prepare('PRAGMA table_info(users)').all();
+const hasColorColumn = userColumns.some((column) => column.name === 'color');
+if (!hasColorColumn) {
+  db.exec("ALTER TABLE users ADD COLUMN color TEXT DEFAULT '#6366f1'");
+}
+
 const taskColumns = db.prepare('PRAGMA table_info(tasks)').all();
 const hasIsPersonalColumn = taskColumns.some((column) => column.name === 'is_personal');
 if (!hasIsPersonalColumn) {
   db.exec('ALTER TABLE tasks ADD COLUMN is_personal INTEGER NOT NULL DEFAULT 0');
 }
+db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_personal ON tasks(is_personal)');
 
 // Keep historical personal tracker tasks categorized as personal.
 db.prepare(`
