@@ -45,18 +45,52 @@ export default function PersonalTrackerPage() {
     return habitLogs.find((l) => l.habit_id === habitId && l.date === date)?.completed || false;
   };
 
-  const dailySummaries = weekDays.map((day) => {
-    const dayTasks = tasks.filter((task) => task.due_date === day.date);
-    const completed = dayTasks.filter(isTaskCompleted).length;
-    const percent = dayTasks.length ? (completed / dayTasks.length) * 100 : 0;
-    return { ...day, dayTasks, completed, total: dayTasks.length, percent };
-  });
+  const buildOverview = () => {
+    const daily = weekDays.map((day) => {
+      const dayTasks = tasks.filter((task) => task.due_date === day.date);
+      const completedTasks = dayTasks.filter(isTaskCompleted).length;
+      const totalTasks = dayTasks.length;
 
-  const weeklyPercent = (() => {
-    const total = dailySummaries.reduce((sum, day) => sum + day.total, 0);
-    const completed = dailySummaries.reduce((sum, day) => sum + day.completed, 0);
-    return total ? (completed / total) * 100 : 0;
-  })();
+      const completedHabits = habits.filter((habit) => habitCompleted(habit.id, day.date)).length;
+      const totalHabits = habits.length;
+
+      const completed = completedTasks + completedHabits;
+      const total = totalTasks + totalHabits;
+
+      return {
+        ...day,
+        dayTasks,
+        completed,
+        total,
+        completedTasks,
+        totalTasks,
+        completedHabits,
+        totalHabits,
+        percent: total ? (completed / total) * 100 : 0,
+      };
+    });
+
+    const weekly = daily.reduce((acc, day) => ({
+      completedTasks: acc.completedTasks + day.completedTasks,
+      totalTasks: acc.totalTasks + day.totalTasks,
+      completedHabits: acc.completedHabits + day.completedHabits,
+      totalHabits: acc.totalHabits + day.totalHabits,
+      completed: acc.completed + day.completed,
+      total: acc.total + day.total,
+    }), { completedTasks: 0, totalTasks: 0, completedHabits: 0, totalHabits: 0, completed: 0, total: 0 });
+
+    return {
+      daily,
+      weekly: {
+        ...weekly,
+        percent: weekly.total ? (weekly.completed / weekly.total) * 100 : 0,
+      },
+    };
+  };
+
+  const overview = useMemo(() => buildOverview(), [weekDays, tasks, habits, habitLogs, taskOverrides, habitOverrides]);
+  const dailySummaries = overview.daily;
+  const weeklyPercent = overview.weekly.percent;
 
   const runOptimistic = async (fn, rollback) => {
     try {

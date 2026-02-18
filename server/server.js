@@ -317,6 +317,57 @@ function getWeekDays(weekStart) {
   });
 }
 
+function buildTrackerOverview(days, tasks, habits, habitLogs) {
+  const habitCompletionByKey = new Map();
+  for (const log of habitLogs) {
+    habitCompletionByKey.set(`${log.habit_id}-${log.date}`, !!log.completed);
+  }
+
+  const daily = days.map((date) => {
+    const tasksForDay = tasks.filter((task) => task.due_date === date);
+    const totalTasks = tasksForDay.length;
+    const completedTasks = tasksForDay.filter((task) => !!task.completed).length;
+
+    const totalHabits = habits.length;
+    const completedHabits = habits.filter((habit) => habitCompletionByKey.get(`${habit.id}-${date}`)).length;
+
+    const total = totalTasks + totalHabits;
+    const completed = completedTasks + completedHabits;
+    const percent = total ? (completed / total) * 100 : 0;
+
+    return {
+      date,
+      completedTasks,
+      totalTasks,
+      completedHabits,
+      totalHabits,
+      completed,
+      total,
+      percent,
+    };
+  });
+
+  const weekly = daily.reduce(
+    (acc, day) => ({
+      completedTasks: acc.completedTasks + day.completedTasks,
+      totalTasks: acc.totalTasks + day.totalTasks,
+      completedHabits: acc.completedHabits + day.completedHabits,
+      totalHabits: acc.totalHabits + day.totalHabits,
+      completed: acc.completed + day.completed,
+      total: acc.total + day.total,
+    }),
+    { completedTasks: 0, totalTasks: 0, completedHabits: 0, totalHabits: 0, completed: 0, total: 0 }
+  );
+
+  return {
+    daily,
+    weekly: {
+      ...weekly,
+      percent: weekly.total ? (weekly.completed / weekly.total) * 100 : 0,
+    },
+  };
+}
+
 // Personal tracker
 app.get('/api/tracker/weekly', authMiddleware, (req, res) => {
   const weekStart = req.query.week_start || formatYmd(getSunday());
@@ -347,14 +398,17 @@ app.get('/api/tracker/weekly', authMiddleware, (req, res) => {
   `).all(req.user.id);
 
   const habitLogs = db.prepare(`
-    SELECT hl.id, hl.habit_id, hl.date, hl.completed
+    SELECT MIN(hl.id) as id, hl.habit_id, hl.date, MAX(hl.completed) as completed
     FROM habit_logs hl
     JOIN habits h ON h.id = hl.habit_id
     WHERE h.user_id = ?
       AND hl.date BETWEEN ? AND ?
+    GROUP BY hl.habit_id, hl.date
   `).all(req.user.id, weekStart, weekEnd).map((log) => ({ ...log, completed: !!log.completed }));
 
-  res.json({ weekStart, weekEnd, days, tasks: weeklyTasks, habits, habitLogs });
+  const overview = buildTrackerOverview(days, weeklyTasks, habits, habitLogs);
+
+  res.json({ weekStart, weekEnd, days, tasks: weeklyTasks, habits, habitLogs, overview });
 });
 
 app.post('/api/tracker/tasks', authMiddleware, (req, res) => {
