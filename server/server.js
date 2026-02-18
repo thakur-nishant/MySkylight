@@ -273,6 +273,195 @@ app.delete('/api/completions/:id', authMiddleware, (req, res) => {
   res.status(204).send();
 });
 
+function getSunday(dateInput = new Date()) {
+  const date = new Date(dateInput);
+  const day = date.getDay();
+  const sunday = new Date(date);
+  sunday.setDate(date.getDate() - day);
+  sunday.setHours(0, 0, 0, 0);
+  return sunday;
+}
+
+function formatYmd(date) {
+  const d = new Date(date);
+  const month = `${d.getMonth() + 1}`.padStart(2, '0');
+  const day = `${d.getDate()}`.padStart(2, '0');
+  return `${d.getFullYear()}-${month}-${day}`;
+}
+
+function getWeekDays(weekStart) {
+  const start = getSunday(weekStart);
+  return Array.from({ length: 7 }).map((_, i) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    return formatYmd(d);
+  });
+}
+
+// Personal tracker
+app.get('/api/tracker/weekly', authMiddleware, (req, res) => {
+  const weekStart = req.query.week_start || formatYmd(getSunday());
+  const days = getWeekDays(weekStart);
+  const weekEnd = days[6];
+
+  const weeklyTasks = db.prepare(`
+    SELECT t.id, t.title, t.due_date,
+      EXISTS(
+        SELECT 1 FROM task_completions tc
+        WHERE tc.task_id = t.id
+          AND date(tc.completed_at) = t.due_date
+      ) as completed
+    FROM tasks t
+    WHERE t.created_by = ?
+      AND t.task_type = 'one-time'
+      AND t.recurrence_pattern = 'personal_tracker'
+      AND t.due_date BETWEEN ? AND ?
+    ORDER BY t.due_date, t.created_at
+  `).all(req.user.id, weekStart, weekEnd).map((t) => ({ ...t, completed: !!t.completed }));
+
+  const habits = db.prepare(`
+    SELECT id, name, created_at, updated_at
+    FROM habits
+    WHERE user_id = ?
+    ORDER BY created_at DESC
+  `).all(req.user.id);
+
+  const habitLogs = db.prepare(`
+    SELECT hl.id, hl.habit_id, hl.date, hl.completed
+    FROM habit_logs hl
+    JOIN habits h ON h.id = hl.habit_id
+    WHERE h.user_id = ?
+      AND hl.date BETWEEN ? AND ?
+  `).all(req.user.id, weekStart, weekEnd).map((log) => ({ ...log, completed: !!log.completed }));
+
+  res.json({ weekStart, weekEnd, days, tasks: weeklyTasks, habits, habitLogs });
+});
+
+app.post('/api/tracker/tasks', authMiddleware, (req, res) => {
+  const { title, due_date } = req.body;
+  if (!title || !due_date) return res.status(400).json({ error: 'title and due_date are required' });
+
+  const result = db.prepare(`
+    INSERT INTO tasks (title, task_type, recurrence_pattern, due_date, created_by, is_all_day)
+    VALUES (?, 'one-time', 'personal_tracker', ?, ?, 1)
+  `).run(title, due_date, req.user.id);
+
+  const task = db.prepare('SELECT id, title, due_date FROM tasks WHERE id = ?').get(result.lastInsertRowid);
+  res.status(201).json(task);
+});
+
+app.patch('/api/tracker/tasks/:id', authMiddleware, (req, res) => {
+  const { id } = req.params;
+  const { title, due_date } = req.body;
+  const task = db.prepare(`
+    SELECT id FROM tasks
+    WHERE id = ? AND created_by = ? AND recurrence_pattern = 'personal_tracker'
+  `).get(id, req.user.id);
+
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  db.prepare(`
+    UPDATE tasks SET
+      title = COALESCE(?, title),
+      due_date = COALESCE(?, due_date)
+    WHERE id = ?
+  `).run(title ?? null, due_date ?? null, id);
+
+  res.json({ success: true });
+});
+
+app.delete('/api/tracker/tasks/:id', authMiddleware, (req, res) => {
+  const result = db.prepare(`
+    DELETE FROM tasks
+    WHERE id = ? AND created_by = ? AND recurrence_pattern = 'personal_tracker'
+  `).run(req.params.id, req.user.id);
+
+  if (!result.changes) return res.status(404).json({ error: 'Task not found' });
+  res.status(204).send();
+});
+
+app.patch('/api/tracker/tasks/:id/toggle', authMiddleware, (req, res) => {
+  const { id } = req.params;
+  const { completed, date } = req.body;
+  if (!date) return res.status(400).json({ error: 'date is required' });
+
+  const task = db.prepare(`
+    SELECT id, due_date, default_stars FROM tasks
+    WHERE id = ? AND created_by = ? AND recurrence_pattern = 'personal_tracker'
+  `).get(id, req.user.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  if (completed) {
+    const existing = db.prepare(`
+      SELECT id FROM task_completions
+      WHERE task_id = ? AND date(completed_at) = ?
+      LIMIT 1
+    `).get(id, date);
+
+    if (!existing) {
+      db.prepare(`
+        INSERT INTO task_completions (task_id, user_id, completed_at, stars_earned)
+        VALUES (?, ?, datetime(? || 'T12:00:00Z'), ?)
+      `).run(id, req.user.id, date, task.default_stars ?? 1);
+    }
+  } else {
+    db.prepare(`
+      DELETE FROM task_completions
+      WHERE task_id = ? AND date(completed_at) = ?
+    `).run(id, date);
+  }
+
+  res.json({ success: true });
+});
+
+app.post('/api/tracker/habits', authMiddleware, (req, res) => {
+  const { name } = req.body;
+  if (!name) return res.status(400).json({ error: 'name is required' });
+
+  const result = db.prepare(`
+    INSERT INTO habits (user_id, name)
+    VALUES (?, ?)
+  `).run(req.user.id, name);
+
+  const habit = db.prepare('SELECT id, name FROM habits WHERE id = ?').get(result.lastInsertRowid);
+  res.status(201).json(habit);
+});
+
+app.patch('/api/tracker/habits/:id', authMiddleware, (req, res) => {
+  const { name } = req.body;
+  const result = db.prepare(`
+    UPDATE habits
+    SET name = COALESCE(?, name), updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND user_id = ?
+  `).run(name ?? null, req.params.id, req.user.id);
+
+  if (!result.changes) return res.status(404).json({ error: 'Habit not found' });
+  res.json({ success: true });
+});
+
+app.delete('/api/tracker/habits/:id', authMiddleware, (req, res) => {
+  const result = db.prepare('DELETE FROM habits WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
+  if (!result.changes) return res.status(404).json({ error: 'Habit not found' });
+  res.status(204).send();
+});
+
+app.patch('/api/tracker/habits/:id/toggle', authMiddleware, (req, res) => {
+  const { date, completed } = req.body;
+  if (!date) return res.status(400).json({ error: 'date is required' });
+
+  const habit = db.prepare('SELECT id FROM habits WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+  if (!habit) return res.status(404).json({ error: 'Habit not found' });
+
+  db.prepare(`
+    INSERT INTO habit_logs (habit_id, date, completed)
+    VALUES (?, ?, ?)
+    ON CONFLICT(habit_id, date)
+    DO UPDATE SET completed = excluded.completed, updated_at = CURRENT_TIMESTAMP
+  `).run(req.params.id, date, completed ? 1 : 0);
+
+  res.json({ success: true });
+});
+
 // Task completions - batch update
 app.patch('/api/completions', authMiddleware, (req, res) => {
   let { updates, task_id } = req.body; 
