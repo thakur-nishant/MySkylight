@@ -32,11 +32,17 @@ app.post('/api/auth/register', (req, res) => {
 });
 
 app.post('/api/auth/login', (req, res) => {
-  const { email, password } = req.body;
+  const { email, password } = req.body ?? {};
+
+  if (typeof email !== 'string' || typeof password !== 'string' || !email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
   if (!user || !verifyPassword(password, user.password_hash)) {
     return res.status(401).json({ error: 'Invalid email or password' });
   }
+
   const { password_hash, ...safeUser } = user;
   const safeUserObj = { id: safeUser.id, name: safeUser.name, email: safeUser.email, color: safeUser.color };
   res.json({ user: safeUserObj, token: createToken(safeUserObj) });

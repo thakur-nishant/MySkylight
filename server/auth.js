@@ -10,6 +10,9 @@ export function hashPassword(password) {
 }
 
 export function verifyPassword(password, hash) {
+  if (typeof password !== 'string' || typeof hash !== 'string') {
+    return false;
+  }
   return bcrypt.compareSync(password, hash);
 }
 
