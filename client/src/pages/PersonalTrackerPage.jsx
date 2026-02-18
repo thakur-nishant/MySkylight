@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { format, addDays, startOfWeek } from 'date-fns';
+import { format, addDays, startOfWeek, parseISO } from 'date-fns';
 import { tracker } from '../api';
 import { useQuery } from '../hooks/useQuery';
 import RingProgress from '../components/RingProgress';
@@ -12,7 +12,7 @@ function getWeekStart() {
 }
 
 function getWeekDays(weekStart) {
-  const start = new Date(`${weekStart}T00:00:00`);
+  const start = parseISO(weekStart);
   return Array.from({ length: 7 }).map((_, idx) => {
     const date = addDays(start, idx);
     return { date: format(date, 'yyyy-MM-dd'), label: DAY_LABELS[idx], title: format(date, 'EEE, MMM d') };
@@ -56,6 +56,8 @@ export default function PersonalTrackerPage() {
   const runOptimistic = async (fn) => {
     try {
       await fn();
+    } catch (error) {
+      console.error(error);
     } finally {
       refetch();
       setTaskOverrides({});
@@ -140,7 +142,7 @@ export default function PersonalTrackerPage() {
                         onChange={(e) => {
                           const checked = e.target.checked;
                           setHabitOverrides((prev) => ({ ...prev, [`${habit.id}-${d.date}`]: checked }));
-                          runOptimistic(() => tracker.toggleHabit(habit.id, { date: d.date, completed: checked }));
+                          void runOptimistic(() => tracker.toggleHabit(habit.id, { date: d.date, completed: checked }));
                         }}
                       />
                     </td>
@@ -182,7 +184,7 @@ export default function PersonalTrackerPage() {
                     onChange={(e) => {
                       const checked = e.target.checked;
                       setTaskOverrides((prev) => ({ ...prev, [task.id]: checked }));
-                      runOptimistic(() => tracker.toggleTask(task.id, { date: day.date, completed: checked }));
+                      void runOptimistic(() => tracker.toggleTask(task.id, { date: day.date, completed: checked }));
                     }}
                   />
                   <input

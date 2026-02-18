@@ -273,8 +273,20 @@ app.delete('/api/completions/:id', authMiddleware, (req, res) => {
   res.status(204).send();
 });
 
+function parseDateInput(dateInput = new Date()) {
+  if (typeof dateInput === 'string') {
+    const dateOnlyMatch = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnlyMatch) {
+      const [, year, month, day] = dateOnlyMatch;
+      return new Date(Number(year), Number(month) - 1, Number(day));
+    }
+  }
+
+  return new Date(dateInput);
+}
+
 function getSunday(dateInput = new Date()) {
-  const date = new Date(dateInput);
+  const date = parseDateInput(dateInput);
   const day = date.getDay();
   const sunday = new Date(date);
   sunday.setDate(date.getDate() - day);
@@ -309,6 +321,7 @@ app.get('/api/tracker/weekly', authMiddleware, (req, res) => {
       EXISTS(
         SELECT 1 FROM task_completions tc
         WHERE tc.task_id = t.id
+          AND tc.user_id = ?
           AND date(tc.completed_at) = t.due_date
       ) as completed
     FROM tasks t
@@ -317,7 +330,7 @@ app.get('/api/tracker/weekly', authMiddleware, (req, res) => {
       AND t.recurrence_pattern = 'personal_tracker'
       AND t.due_date BETWEEN ? AND ?
     ORDER BY t.due_date, t.created_at
-  `).all(req.user.id, weekStart, weekEnd).map((t) => ({ ...t, completed: !!t.completed }));
+  `).all(req.user.id, req.user.id, weekStart, weekEnd).map((t) => ({ ...t, completed: !!t.completed }));
 
   const habits = db.prepare(`
     SELECT id, name, created_at, updated_at
@@ -395,8 +408,9 @@ app.patch('/api/tracker/tasks/:id/toggle', authMiddleware, (req, res) => {
     const existing = db.prepare(`
       SELECT id FROM task_completions
       WHERE task_id = ? AND date(completed_at) = ?
+        AND user_id = ?
       LIMIT 1
-    `).get(id, date);
+    `).get(id, date, req.user.id);
 
     if (!existing) {
       db.prepare(`
@@ -408,7 +422,8 @@ app.patch('/api/tracker/tasks/:id/toggle', authMiddleware, (req, res) => {
     db.prepare(`
       DELETE FROM task_completions
       WHERE task_id = ? AND date(completed_at) = ?
-    `).run(id, date);
+        AND user_id = ?
+    `).run(id, date, req.user.id);
   }
 
   res.json({ success: true });
