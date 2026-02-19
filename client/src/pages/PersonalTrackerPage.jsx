@@ -26,6 +26,9 @@ export default function PersonalTrackerPage() {
   const [taskOverrides, setTaskOverrides] = useState({});
   const [habitOverrides, setHabitOverrides] = useState({});
   const [trackerData, setTrackerData] = useState(null);
+  const [openActionsForTask, setOpenActionsForTask] = useState(null);
+  const [editingTaskId, setEditingTaskId] = useState(null);
+  const [editingTaskTitle, setEditingTaskTitle] = useState('');
 
   const { data, loading, refetch } = useQuery(['tracker', weekStart], () => tracker.weekly({ week_start: weekStart }));
 
@@ -102,6 +105,23 @@ export default function PersonalTrackerPage() {
       setTaskOverrides({});
       setHabitOverrides({});
     }
+  };
+
+  const getNextDate = (date) => format(addDays(parseISO(date), 1), 'yyyy-MM-dd');
+
+  const startEditingTask = (task) => {
+    setEditingTaskId(task.id);
+    setEditingTaskTitle(task.title);
+    setOpenActionsForTask(null);
+  };
+
+  const saveTaskTitle = async (taskId) => {
+    const title = editingTaskTitle.trim();
+    if (!title) return;
+    await tracker.updateTask(taskId, { title });
+    setEditingTaskId(null);
+    setEditingTaskTitle('');
+    refetch();
   };
 
   if (loading || !trackerData) return <div className="p-6">Loading tracker...</div>;
@@ -236,7 +256,7 @@ export default function PersonalTrackerPage() {
 
             <div className="space-y-2">
               {day.dayTasks.map((task) => (
-                <div key={task.id} className="flex items-center gap-2">
+                <div key={task.id} className="flex items-center gap-2 relative">
                   <input
                     type="checkbox"
                     checked={isTaskCompleted(task)}
@@ -261,10 +281,72 @@ export default function PersonalTrackerPage() {
                       );
                     }}
                   />
-                  <span className="flex-1 border border-slate-200 rounded px-2 py-1 bg-slate-50 text-slate-700">
-                    {task.title}
-                  </span>
-                  <button className="text-rose-600 text-xs" onClick={async () => { await tracker.deleteTask(task.id); refetch(); }}>Delete</button>
+                  {editingTaskId === task.id ? (
+                    <div className="flex-1 flex items-center gap-2">
+                      <input
+                        value={editingTaskTitle}
+                        onChange={(e) => setEditingTaskTitle(e.target.value)}
+                        className="flex-1 border border-slate-300 rounded px-2 py-1 text-sm"
+                        autoFocus
+                      />
+                      <button className="text-xs text-sky-700" onClick={() => saveTaskTitle(task.id)}>Save</button>
+                      <button className="text-xs text-slate-500" onClick={() => { setEditingTaskId(null); setEditingTaskTitle(''); }}>Cancel</button>
+                    </div>
+                  ) : (
+                    <span className="flex-1 border border-slate-200 rounded px-2 py-1 bg-slate-50 text-slate-700">
+                      {task.title}
+                    </span>
+                  )}
+
+                  <button
+                    className="text-slate-700 text-xs border border-slate-300 rounded px-2 py-1"
+                    onClick={() => setOpenActionsForTask((prev) => (prev === task.id ? null : task.id))}
+                  >
+                    ⚙ Actions
+                  </button>
+
+                  {openActionsForTask === task.id && (
+                    <div className="absolute right-0 top-9 z-10 bg-white border border-slate-200 rounded-lg shadow-md p-1 min-w-[140px]">
+                      <button
+                        className="block w-full text-left text-sm px-3 py-1 hover:bg-slate-100 rounded"
+                        onClick={() => startEditingTask(task)}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="block w-full text-left text-sm px-3 py-1 hover:bg-slate-100 rounded"
+                        onClick={async () => {
+                          await tracker.updateTask(task.id, { due_date: getNextDate(day.date) });
+                          setOpenActionsForTask(null);
+                          refetch();
+                        }}
+                      >
+                        Move
+                      </button>
+                      <button
+                        className="block w-full text-left text-sm px-3 py-1 hover:bg-slate-100 rounded"
+                        onClick={async () => {
+                          const nextDate = getNextDate(day.date);
+                          const continuedTitle = task.title.includes('[cont.]') ? task.title : `${task.title} [cont.]`;
+                          await tracker.createTask({ title: continuedTitle, due_date: nextDate });
+                          setOpenActionsForTask(null);
+                          refetch();
+                        }}
+                      >
+                        Continue
+                      </button>
+                      <button
+                        className="block w-full text-left text-sm px-3 py-1 hover:bg-rose-50 text-rose-600 rounded"
+                        onClick={async () => {
+                          await tracker.deleteTask(task.id);
+                          setOpenActionsForTask(null);
+                          refetch();
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
