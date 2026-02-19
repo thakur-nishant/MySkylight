@@ -606,7 +606,7 @@ app.patch('/api/completions', authMiddleware, (req, res) => {
 app.get('/api/insights/scores', authMiddleware, (req, res) => {
   const { start_date, end_date } = req.query;
   const params = [];
-  let joinExtra = '';
+  let joinExtra = ' AND t.is_personal = 0';
   if (start_date) { joinExtra += ' AND date(tc.completed_at) >= ?'; params.push(start_date); }
   if (end_date) { joinExtra += ' AND date(tc.completed_at) <= ?'; params.push(end_date); }
 
@@ -615,7 +615,8 @@ app.get('/api/insights/scores', authMiddleware, (req, res) => {
       COALESCE(SUM(tc.stars_earned), 0) as total_stars,
       COUNT(tc.id) as completions_count
     FROM users u
-    LEFT JOIN task_completions tc ON tc.user_id = u.id ${joinExtra}
+    LEFT JOIN task_completions tc ON tc.user_id = u.id
+    LEFT JOIN tasks t ON t.id = tc.task_id ${joinExtra}
     GROUP BY u.id
     ORDER BY total_stars DESC
   `).all(...params);
@@ -630,7 +631,7 @@ app.get('/api/insights/task-counts', authMiddleware, (req, res) => {
     FROM task_completions tc
     JOIN tasks t ON t.id = tc.task_id
     LEFT JOIN users u ON u.id = tc.user_id
-    WHERE 1=1
+    WHERE t.is_personal = 0
   `;
   const params = [];
   if (task_id) { sql += ' AND tc.task_id = ?'; params.push(task_id); }
@@ -657,13 +658,24 @@ app.get('/api/insights/overview', authMiddleware, (req, res) => {
     params.push(end_date);
   }
   const tcDateFilter = dateFilter.replace('date(completed_at)', 'date(tc.completed_at)');
+  const personalExclusion = tcDateFilter ? `${tcDateFilter} AND t.is_personal = 0` : 'WHERE t.is_personal = 0';
 
-  const totalCompletions = db.prepare(`SELECT COUNT(*) as total FROM task_completions ${dateFilter}`).get(...params)?.total || 0;
-  const totalStars = db.prepare(`SELECT COALESCE(SUM(stars_earned), 0) as total FROM task_completions ${dateFilter}`).get(...params)?.total || 0;
+  const totalCompletions = db.prepare(`
+    SELECT COUNT(tc.id) as total
+    FROM task_completions tc
+    JOIN tasks t ON t.id = tc.task_id
+    ${personalExclusion}
+  `).get(...params)?.total || 0;
+  const totalStars = db.prepare(`
+    SELECT COALESCE(SUM(tc.stars_earned), 0) as total
+    FROM task_completions tc
+    JOIN tasks t ON t.id = tc.task_id
+    ${personalExclusion}
+  `).get(...params)?.total || 0;
   const topTasks = db.prepare(`
     SELECT t.title, t.task_type, COUNT(tc.id) as completions
     FROM task_completions tc
-    JOIN tasks t ON t.id = tc.task_id ${tcDateFilter}
+    JOIN tasks t ON t.id = tc.task_id ${personalExclusion}
     GROUP BY tc.task_id
     ORDER BY completions DESC
     LIMIT 10
