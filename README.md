@@ -8,6 +8,9 @@ A household calendar and task management app inspired by Skylight Calendar. Mana
 - Automatic dependency bootstrapping on `npm install` via a root `postinstall` script
 - Personal Tracker overview now combines **task + habit** completion in daily and weekly progress metrics
 - Habit toggle persistence improved to avoid duplicate log rows and preserve checkbox state across refreshes
+- Frontend now uses protected routes with JWT session restore (`/api/auth/me`) on refresh
+- Insights view includes scoreboards, completion counts, and date-range summaries
+- Calendar feed endpoint is available for rendering task events in day/week/month views
 
 ## Features
 
@@ -18,6 +21,13 @@ A household calendar and task management app inspired by Skylight Calendar. Mana
 - **Star rewards** – Earn stars for completing tasks
 - **Insights & scoring** – Review user scores, top tasks, and completion activity over time
 - **Filters** – Filter tasks by assignee/type and completions by date/user/task
+
+## Authentication flow
+
+- `POST /api/auth/login` issues a JWT token
+- Client stores the token in `localStorage`
+- On app load, `AuthContext` calls `GET /api/auth/me` to restore the session
+- Unauthenticated users are redirected to `/login`
 
 ## Quick start
 
@@ -31,6 +41,18 @@ npm run dev
 
 - **Frontend**: http://localhost:5173
 - **Backend**: http://localhost:3001
+
+### Environment variables
+
+Backend (`server/server.js`):
+
+- `PORT` (optional): API port (default `3001`)
+- `JWT_SECRET` (optional): token signing secret (defaults to development value)
+
+Frontend (`client/src/api.js`):
+
+- `VITE_API_URL` (optional): explicit API base URL
+- If unset, the client defaults to `http://localhost:3001/api` in local dev and `/api` in production
 
 
 ## Demo credentials
@@ -154,8 +176,8 @@ Create `/etc/apache2/sites-available/myskylight.conf`:
 
     # Proxy API requests to backend
     ProxyPreserveHost On
-    ProxyPass /api https://127.0.0.1:3001/api
-    ProxyPassReverse /api https://127.0.0.1:3001/api
+    ProxyPass /api http://127.0.0.1:3001/api
+    ProxyPassReverse /api http://127.0.0.1:3001/api
 
     # SPA fallback for frontend routes
     RewriteCond %{REQUEST_URI} !^/api
@@ -193,6 +215,13 @@ pm2 startup
 ## API overview
 
 All endpoints below are under `http://localhost:3001`. Most routes require `Authorization: Bearer <token>`.
+
+### Common query parameters
+
+- Tasks: `assigned_to`, `type`
+- Completions: `task_id`, `user_id`, `start_date`, `end_date`
+- Tracker weekly payload: `week_start`
+- Insights: `start_date`, `end_date`
 
 ### Auth
 
