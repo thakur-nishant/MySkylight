@@ -3,7 +3,6 @@ import { useQuery } from '../hooks/useQuery';
 import { insights, tasks as tasksApi } from '../api';
 import { Star, TrendingUp, CheckCircle, Award } from 'lucide-react';
 import {
-  todayPST,
   getWeekRangePST,
   getMonthRangePST,
   getYearRangePST,
@@ -14,14 +13,30 @@ import {
  * Component
  * ---------------------------------------- */
 export default function InsightsPage() {
+  const initialCustomRange = useMemo(() => getWeekRangePST(), []);
   const [range, setRange] = useState('week');
+  const [customStart, setCustomStart] = useState(initialCustomRange.start);
+  const [customEnd, setCustomEnd] = useState(initialCustomRange.end);
   const [filterTask, setFilterTask] = useState('');
 
   const { start, end } = useMemo(() => {
     if (range === 'week') return getWeekRangePST();
     if (range === 'month') return getMonthRangePST();
+    if (range === 'custom') {
+      const normalizedStart = customStart && customEnd && customStart > customEnd
+        ? customEnd
+        : customStart;
+      const normalizedEnd = customStart && customEnd && customEnd < customStart
+        ? customStart
+        : customEnd;
+
+      return {
+        start: normalizedStart,
+        end: normalizedEnd,
+      };
+    }
     return getYearRangePST();
-  }, [range]);
+  }, [range, customStart, customEnd]);
 
   const params = { start_date: start, end_date: end };
   const taskCountParams = { ...params };
@@ -61,7 +76,7 @@ export default function InsightsPage() {
           Insights & scoring
         </h1>
         <div className="flex gap-2">
-          {['week', 'month', 'year'].map((r) => (
+          {['week', 'month', 'year', 'custom'].map((r) => (
             <button
               key={r}
               onClick={() => setRange(r)}
@@ -82,6 +97,32 @@ export default function InsightsPage() {
         <span className="text-sm text-slate-500">
           Showing data from {start} to {end} (PST)
         </span>
+        {range === 'custom' && (
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-sm font-medium text-slate-700" htmlFor="custom-start-date">
+              Start date:
+            </label>
+            <input
+              id="custom-start-date"
+              type="date"
+              value={customStart}
+              max={customEnd || undefined}
+              onChange={(e) => setCustomStart(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-sky-500"
+            />
+            <label className="text-sm font-medium text-slate-700" htmlFor="custom-end-date">
+              End date:
+            </label>
+            <input
+              id="custom-end-date"
+              type="date"
+              value={customEnd}
+              min={customStart || undefined}
+              onChange={(e) => setCustomEnd(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-sky-500"
+            />
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <label className="text-sm font-medium text-slate-700">
             Filter by task:
