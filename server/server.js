@@ -1,14 +1,12 @@
 import express from 'express';
 import cors from 'cors';
-import https from 'https';
-import selfsigned from 'selfsigned';
 import db from './database.js';
 import { hashPassword, verifyPassword, createToken, authMiddleware } from './auth.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors({ origin: 'https://localhost:5173', credentials: true }));
+app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
 app.use(express.json());
 
 // Auth routes
@@ -695,14 +693,6 @@ app.get('/api/calendar/events', authMiddleware, (req, res) => {
   res.json(events);
 });
 
-const certAttrs = [{ name: 'commonName', value: 'localhost' }];
-const cert = selfsigned.generate(certAttrs, {
-  algorithm: 'sha256',
-  days: 365,
-  keySize: 2048,
-  extensions: [{ name: 'subjectAltName', altNames: [{ type: 2, value: 'localhost' }] }]
-});
-
-https.createServer({ key: cert.private, cert: cert.cert }, app).listen(PORT, '0.0.0.0', () => {
-  console.log(`MySkylight server running on https://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`MySkylight server running on http://localhost:${PORT}`);
 });
