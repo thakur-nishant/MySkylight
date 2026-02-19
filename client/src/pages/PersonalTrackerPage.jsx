@@ -162,16 +162,9 @@ export default function PersonalTrackerPage() {
               return (
                 <tr key={habit.id} className="border-b">
                   <td className="py-2">
-                    <input
-                      defaultValue={habit.name}
-                      onBlur={async (e) => {
-                        const name = e.target.value.trim();
-                        if (!name || name === habit.name) return;
-                        await tracker.updateHabit(habit.id, { name });
-                        refetch();
-                      }}
-                      className="border border-slate-200 rounded px-2 py-1 w-full"
-                    />
+                    <span className="block border border-slate-200 rounded px-2 py-1 w-full bg-slate-50 text-slate-700">
+                      {habit.name}
+                    </span>
                   </td>
                   {weekDays.map((d) => (
                     <td key={d.date} className="text-center">
@@ -268,16 +261,9 @@ export default function PersonalTrackerPage() {
                       );
                     }}
                   />
-                  <input
-                    defaultValue={task.title}
-                    onBlur={async (e) => {
-                      const title = e.target.value.trim();
-                      if (!title || title === task.title) return;
-                      await tracker.updateTask(task.id, { title });
-                      refetch();
-                    }}
-                    className="flex-1 border border-slate-200 rounded px-2 py-1"
-                  />
+                  <span className="flex-1 border border-slate-200 rounded px-2 py-1 bg-slate-50 text-slate-700">
+                    {task.title}
+                  </span>
                   <button className="text-rose-600 text-xs" onClick={async () => { await tracker.deleteTask(task.id); refetch(); }}>Delete</button>
                 </div>
               ))}
