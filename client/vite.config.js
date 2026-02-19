@@ -6,8 +6,9 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    https: true,
     proxy: {
-      '/api': 'http://localhost:3001'
+      '/api': 'https://localhost:3001'
     }
   }
 });

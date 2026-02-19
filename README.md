@@ -21,8 +21,8 @@ npm run install:all
 npm run dev
 ```
 
-- **Frontend**: http://localhost:5173
-- **Backend**: http://localhost:3001
+- **Frontend**: https://localhost:5173
+- **Backend**: https://localhost:3001
 
 ## Demo credentials
 
