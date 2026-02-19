@@ -4,7 +4,7 @@ A household calendar and task management app inspired by Skylight Calendar. Mana
 
 ## What's new
 
-- HTTPS-only local development for both client and server (`https://localhost:5173` + `https://localhost:3001`)
+- Flexible local development: frontend can run over HTTP by default or HTTPS via `VITE_DEV_HTTPS=true`; backend remains HTTPS (`https://localhost:3001`)
 - Automatic dependency bootstrapping on `npm install` via a root `postinstall` script
 - Personal Tracker overview now combines **task + habit** completion in daily and weekly progress metrics
 - Habit toggle persistence improved to avoid duplicate log rows and preserve checkbox state across refreshes
@@ -29,10 +29,13 @@ npm install
 npm run dev
 ```
 
-- **Frontend**: https://localhost:5173
+- **Frontend (default)**: http://localhost:5173
+- **Frontend (HTTPS opt-in)**: `VITE_DEV_HTTPS=true npm run client` then open `https://localhost:5173`
 - **Backend**: https://localhost:3001
 
-> On first run, your browser may show a warning because the app uses a locally generated self-signed certificate. Continue to `localhost` to proceed.
+> The backend uses a locally generated self-signed certificate. Your browser may show a warning on first run; continue to `localhost` to proceed.
+>
+> If you are accessing the app over LAN/IP (e.g., `10.0.0.130`), prefer `http://<ip>:5173` unless you have explicitly enabled frontend HTTPS.
 
 ## Demo credentials
 
