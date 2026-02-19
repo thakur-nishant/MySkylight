@@ -606,17 +606,23 @@ app.patch('/api/completions', authMiddleware, (req, res) => {
 app.get('/api/insights/scores', authMiddleware, (req, res) => {
   const { start_date, end_date } = req.query;
   const params = [];
-  let joinExtra = ' AND t.is_personal = 0';
-  if (start_date) { joinExtra += ' AND date(tc.completed_at) >= ?'; params.push(start_date); }
-  if (end_date) { joinExtra += ' AND date(tc.completed_at) <= ?'; params.push(end_date); }
+  const completionJoinFilters = ['tc.user_id = u.id'];
+  if (start_date) {
+    completionJoinFilters.push('date(tc.completed_at) >= ?');
+    params.push(start_date);
+  }
+  if (end_date) {
+    completionJoinFilters.push('date(tc.completed_at) <= ?');
+    params.push(end_date);
+  }
 
   const scores = db.prepare(`
     SELECT u.id, u.name, u.color,
-      COALESCE(SUM(tc.stars_earned), 0) as total_stars,
-      COUNT(tc.id) as completions_count
+      COALESCE(SUM(CASE WHEN t.id IS NOT NULL THEN tc.stars_earned ELSE 0 END), 0) as total_stars,
+      COUNT(t.id) as completions_count
     FROM users u
-    LEFT JOIN task_completions tc ON tc.user_id = u.id
-    LEFT JOIN tasks t ON t.id = tc.task_id ${joinExtra}
+    LEFT JOIN task_completions tc ON ${completionJoinFilters.join(' AND ')}
+    LEFT JOIN tasks t ON t.id = tc.task_id AND t.is_personal = 0
     GROUP BY u.id
     ORDER BY total_stars DESC
   `).all(...params);
