@@ -7,11 +7,10 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "sql.js": "^1.11.0",
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "express": "^4.21.1",
-    "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
-    "selfsigned": "^2.4.1"
+    "sql.js": "^1.11.0"
   }
 }
