@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, SquarePen } from 'lucide-react';
 import { WORKFLOW_COLUMNS } from '../../constants/workflow';
 
 export default function KanbanColumn({
@@ -9,6 +9,7 @@ export default function KanbanColumn({
   onMoveTask,
   onDragStart,
   onDrop,
+  onEditTask,
 }) {
   return (
     <div
@@ -45,6 +46,14 @@ export default function KanbanColumn({
                 ))}
               </select>
               <ArrowRight className="w-3 h-3 text-slate-400" />
+              <button
+                type="button"
+                onClick={() => onEditTask(task)}
+                className="ml-auto inline-flex items-center gap-1 text-xs px-2 py-1 border border-slate-300 rounded hover:bg-slate-50"
+              >
+                <SquarePen className="w-3 h-3" />
+                Edit
+              </button>
             </div>
           </div>
         ))}
