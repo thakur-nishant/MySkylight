@@ -14,15 +14,19 @@ export default function ProjectDashboardPage() {
   const [error, setError] = useState('');
   const [draggedTaskId, setDraggedTaskId] = useState(null);
 
-  const { data: projects = [], refetch: refetchProjects, isLoading: projectsLoading } = useQuery(
+  const { data: projectsData, refetch: refetchProjects, isLoading: projectsLoading } = useQuery(
     ['projects'],
     () => projectsApi.list()
   );
-  const { data: users = [], isLoading: usersLoading } = useQuery(['users'], () => usersApi.list());
-  const { data: tasks = [], refetch: refetchTasks, isLoading: tasksLoading } = useQuery(
+  const { data: usersData, isLoading: usersLoading } = useQuery(['users'], () => usersApi.list());
+  const { data: tasksData, refetch: refetchTasks, isLoading: tasksLoading } = useQuery(
     ['tasks', activeProjectId],
     () => tasksApi.list(activeProjectId ? { project_id: activeProjectId } : undefined)
   );
+
+  const projects = Array.isArray(projectsData) ? projectsData : [];
+  const users = Array.isArray(usersData) ? usersData : [];
+  const tasks = Array.isArray(tasksData) ? tasksData : [];
 
   const isLoading = projectsLoading || usersLoading || tasksLoading;
 
@@ -79,7 +83,7 @@ export default function ProjectDashboardPage() {
         workflow_status: 'backlog',
         assigned_user_ids: newTask.assigned_user_ids,
       });
-      setNewTask(EMPTY_TASK_FORM);
+      setNewTask({ ...EMPTY_TASK_FORM });
       refetchBoard();
     } catch (err) {
       setError(err.message || 'Failed to create task');
