@@ -15,7 +15,7 @@ import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { useAuth } from '../context/AuthContext';
 
 import { useQuery } from '../hooks/useQuery';
-import { tasks as tasksApi, completions, users as usersApi } from '../api';
+import { tasks as tasksApi, completions, users as usersApi, projects as projectsApi } from '../api';
 import CompleteTaskModal from '../components/CompleteTaskModal';
 import TaskModal from '../components/TaskModal';
 import { CheckCircle, Circle } from 'lucide-react';
@@ -69,6 +69,7 @@ export default function CalendarPage() {
     [completionRange.start, completionRange.end]
   );
   const fetchUsers = useCallback(() => usersApi.list(), []);
+  const fetchProjects = useCallback(() => projectsApi.list(), []);
 
   /** -----------------------------
    * Queries
@@ -84,6 +85,9 @@ export default function CalendarPage() {
 
   const { data: allUsers } = useQuery(['users-all'], fetchUsers);
   const users = Array.isArray(allUsers) ? allUsers : [];
+
+  const { data: allProjects } = useQuery(['projects-all'], fetchProjects);
+  const projects = Array.isArray(allProjects) ? allProjects : [];
 
   /** -----------------------------
    * Calendar events (one-time + event tasks)
@@ -195,6 +199,7 @@ export default function CalendarPage() {
       {task.completed ? <CheckCircle className="w-5 h-5 text-green-600" /> : <Circle className="w-5 h-5 text-slate-400" />}
       <span className={`flex-1 ${task.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>
         {task.title}
+        {task.project_name && <span className="ml-2 text-xs text-indigo-600">[{task.project_name}]</span>}
       </span>
     </button>
   );
@@ -275,6 +280,7 @@ export default function CalendarPage() {
         <TaskModal
           task={null}
           users={users}
+          projects={projects}
           initialDate={modalDate}
           onClose={() => setShowTaskModal(false)}
         />
