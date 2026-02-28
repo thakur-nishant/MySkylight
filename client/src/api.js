@@ -38,11 +38,14 @@ export const users = {
 };
 
 export const projects = {
-  list: async () => {
-    const data = await api('/projects');
+  list: async (params) => {
+    const data = await api('/projects' + (params ? '?' + new URLSearchParams(params).toString() : ''));
     return Array.isArray(data) ? data : [];
   },
   create: (data) => api('/projects', { method: 'POST', body: JSON.stringify(data) }),
+  archive: (id) => api(`/projects/${id}/archive`, { method: 'PATCH' }),
+  restore: (id) => api(`/projects/${id}/restore`, { method: 'PATCH' }),
+  delete: (id) => api(`/projects/${id}`, { method: 'DELETE' }),
 };
 
 export const tasks = {

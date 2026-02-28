@@ -64,14 +64,21 @@ app.get('/api/users', authMiddleware, (req, res) => {
 
 // Projects
 app.get('/api/projects', authMiddleware, (req, res) => {
+  const includeArchived = req.query.include_archived === '1' || req.query.include_archived === 'true';
+
   const projects = db.prepare(`
     SELECT p.*, u.name as created_by_name,
       (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_personal = 0) as task_count
     FROM projects p
     LEFT JOIN users u ON u.id = p.created_by
-    ORDER BY p.created_at DESC
-  `).all();
-  res.json(projects);
+    WHERE (? = 1 OR p.is_archived = 0)
+    ORDER BY p.is_archived ASC, p.created_at DESC
+  `).all(includeArchived ? 1 : 0);
+
+  res.json(projects.map((project) => ({
+    ...project,
+    is_archived: !!project.is_archived,
+  })));
 });
 
 app.post('/api/projects', authMiddleware, (req, res) => {
@@ -84,7 +91,46 @@ app.post('/api/projects', authMiddleware, (req, res) => {
   `).run(name.trim(), description?.trim() || null, req.user.id);
 
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json(project);
+  res.status(201).json({ ...project, is_archived: !!project.is_archived });
+});
+
+app.patch('/api/projects/:id/archive', authMiddleware, (req, res) => {
+  const { id } = req.params;
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+
+  db.prepare(`
+    UPDATE projects
+    SET is_archived = 1, archived_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(id);
+
+  const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+  res.json({ ...updated, is_archived: !!updated.is_archived });
+});
+
+app.patch('/api/projects/:id/restore', authMiddleware, (req, res) => {
+  const { id } = req.params;
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+
+  db.prepare(`
+    UPDATE projects
+    SET is_archived = 0, archived_at = NULL
+    WHERE id = ?
+  `).run(id);
+
+  const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+  res.json({ ...updated, is_archived: !!updated.is_archived });
+});
+
+app.delete('/api/projects/:id', authMiddleware, (req, res) => {
+  const { id } = req.params;
+  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+
+  db.prepare('DELETE FROM projects WHERE id = ?').run(id);
+  res.status(204).send();
 });
 
 // Tasks CRUD
