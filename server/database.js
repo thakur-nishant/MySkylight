@@ -118,6 +118,8 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     description TEXT,
+    is_archived INTEGER NOT NULL DEFAULT 0,
+    archived_at DATETIME,
     created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -189,6 +191,17 @@ if (!hasWorkflowStatusColumn) {
 db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_personal ON tasks(is_personal)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_workflow_status ON tasks(workflow_status)');
+
+const projectColumns = db.prepare('PRAGMA table_info(projects)').all();
+const hasIsArchivedColumn = projectColumns.some((column) => column.name === 'is_archived');
+if (!hasIsArchivedColumn) {
+  db.exec('ALTER TABLE projects ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0');
+}
+const hasArchivedAtColumn = projectColumns.some((column) => column.name === 'archived_at');
+if (!hasArchivedAtColumn) {
+  db.exec('ALTER TABLE projects ADD COLUMN archived_at DATETIME');
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_projects_is_archived ON projects(is_archived)');
 
 // Keep historical personal tracker tasks categorized as personal.
 db.prepare(`

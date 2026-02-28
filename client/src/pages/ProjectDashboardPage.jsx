@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Plus } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Archive, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { projects as projectsApi, tasks as tasksApi, users as usersApi } from '../api';
 import { useQuery } from '../hooks/useQuery';
 import { WORKFLOW_COLUMNS, WORKFLOW_STATUSES } from '../constants/workflow';
@@ -16,7 +16,7 @@ export default function ProjectDashboardPage() {
 
   const { data: projectsData, refetch: refetchProjects, isLoading: projectsLoading } = useQuery(
     ['projects'],
-    () => projectsApi.list()
+    () => projectsApi.list({ include_archived: '1' })
   );
   const { data: usersData, isLoading: usersLoading } = useQuery(['users'], () => usersApi.list());
   const { data: tasksData, refetch: refetchTasks, isLoading: tasksLoading } = useQuery(
@@ -25,15 +25,28 @@ export default function ProjectDashboardPage() {
   );
 
   const projects = Array.isArray(projectsData) ? projectsData : [];
+  const activeProjects = useMemo(() => projects.filter((project) => !project.is_archived), [projects]);
+  const archivedProjects = useMemo(() => projects.filter((project) => project.is_archived), [projects]);
   const users = Array.isArray(usersData) ? usersData : [];
   const tasks = Array.isArray(tasksData) ? tasksData : [];
 
   const isLoading = projectsLoading || usersLoading || tasksLoading;
 
   const selectedProject = useMemo(
-    () => projects.find((project) => String(project.id) === String(activeProjectId)) || projects[0],
-    [projects, activeProjectId]
+    () => activeProjects.find((project) => String(project.id) === String(activeProjectId)) || activeProjects[0],
+    [activeProjects, activeProjectId]
   );
+
+  useEffect(() => {
+    if (!selectedProject) {
+      setActiveProjectId('');
+      return;
+    }
+
+    if (!activeProjectId || String(selectedProject.id) !== String(activeProjectId)) {
+      setActiveProjectId(String(selectedProject.id));
+    }
+  }, [activeProjectId, selectedProject]);
 
   const groupedTasks = useMemo(() => {
     const grouped = Object.fromEntries(WORKFLOW_COLUMNS.map((column) => [column.key, []]));
@@ -87,6 +100,42 @@ export default function ProjectDashboardPage() {
       refetchBoard();
     } catch (err) {
       setError(err.message || 'Failed to create task');
+    }
+  };
+
+  const archiveProject = async (projectId) => {
+    setError('');
+    try {
+      await projectsApi.archive(projectId);
+      if (String(projectId) === String(activeProjectId)) {
+        setActiveProjectId('');
+      }
+      refetchBoard();
+    } catch (err) {
+      setError(err.message || 'Failed to archive project');
+    }
+  };
+
+  const restoreProject = async (projectId) => {
+    setError('');
+    try {
+      await projectsApi.restore(projectId);
+      refetchBoard();
+    } catch (err) {
+      setError(err.message || 'Failed to restore project');
+    }
+  };
+
+  const deleteProject = async (projectId) => {
+    setError('');
+    try {
+      await projectsApi.delete(projectId);
+      if (String(projectId) === String(activeProjectId)) {
+        setActiveProjectId('');
+      }
+      refetchBoard();
+    } catch (err) {
+      setError(err.message || 'Failed to delete project');
     }
   };
 
@@ -152,11 +201,75 @@ export default function ProjectDashboardPage() {
             onChange={(e) => setActiveProjectId(e.target.value)}
             className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg"
           >
-            {projects.map((project) => (
+            {activeProjects.map((project) => (
               <option key={project.id} value={project.id}>{project.name}</option>
             ))}
           </select>
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <section className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+          <h2 className="font-semibold text-slate-800">View Projects</h2>
+          {activeProjects.length === 0 ? (
+            <p className="text-sm text-slate-500">No active projects.</p>
+          ) : (
+            <div className="space-y-2">
+              {activeProjects.map((project) => (
+                <div key={project.id} className="flex items-center justify-between border border-slate-200 rounded-lg px-3 py-2">
+                  <div>
+                    <p className="font-medium text-slate-700">{project.name}</p>
+                    <p className="text-xs text-slate-500">{project.task_count || 0} tasks</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => archiveProject(project.id)}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50"
+                  >
+                    <Archive className="w-4 h-4" />
+                    Archive
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+          <h2 className="font-semibold text-slate-800">View Archived Projects</h2>
+          {archivedProjects.length === 0 ? (
+            <p className="text-sm text-slate-500">No archived projects.</p>
+          ) : (
+            <div className="space-y-2">
+              {archivedProjects.map((project) => (
+                <div key={project.id} className="flex items-center justify-between border border-slate-200 rounded-lg px-3 py-2">
+                  <div>
+                    <p className="font-medium text-slate-700">{project.name}</p>
+                    <p className="text-xs text-slate-500">Archived</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => restoreProject(project.id)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      Restore
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteProject(project.id)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-red-300 text-red-700 hover:bg-red-50"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
 
       {selectedProject && (
