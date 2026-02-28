@@ -109,6 +109,16 @@ db.exec(`
     is_all_day INTEGER DEFAULT 1,
     is_personal INTEGER NOT NULL DEFAULT 0,
     created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    workflow_status TEXT NOT NULL DEFAULT 'backlog',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -168,7 +178,17 @@ const hasIsPersonalColumn = taskColumns.some((column) => column.name === 'is_per
 if (!hasIsPersonalColumn) {
   db.exec('ALTER TABLE tasks ADD COLUMN is_personal INTEGER NOT NULL DEFAULT 0');
 }
+const hasProjectIdColumn = taskColumns.some((column) => column.name === 'project_id');
+if (!hasProjectIdColumn) {
+  db.exec('ALTER TABLE tasks ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL');
+}
+const hasWorkflowStatusColumn = taskColumns.some((column) => column.name === 'workflow_status');
+if (!hasWorkflowStatusColumn) {
+  db.exec("ALTER TABLE tasks ADD COLUMN workflow_status TEXT NOT NULL DEFAULT 'backlog'");
+}
 db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_personal ON tasks(is_personal)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_workflow_status ON tasks(workflow_status)');
 
 // Keep historical personal tracker tasks categorized as personal.
 db.prepare(`

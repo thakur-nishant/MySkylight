@@ -37,6 +37,14 @@ export const users = {
   list: () => api('/users'),
 };
 
+export const projects = {
+  list: async () => {
+    const data = await api('/projects');
+    return Array.isArray(data) ? data : [];
+  },
+  create: (data) => api('/projects', { method: 'POST', body: JSON.stringify(data) }),
+};
+
 export const tasks = {
   list: async (params) => {
     const data = await api(

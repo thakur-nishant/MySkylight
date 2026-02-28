@@ -9,6 +9,10 @@ const PORT = process.env.PORT || 3001;
 app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
 app.use(express.json());
 
+const WORKFLOW_STATUSES = new Set(['backlog', 'todo', 'in_progress', 'done']);
+const VALID_TASK_TYPES = new Set(['daily', 'weekly', 'monthly', 'one-time', 'event']);
+
+
 // Auth routes
 app.post('/api/auth/register', (req, res) => {
   try {
@@ -58,52 +62,111 @@ app.get('/api/users', authMiddleware, (req, res) => {
   res.json(users);
 });
 
+// Projects
+app.get('/api/projects', authMiddleware, (req, res) => {
+  const projects = db.prepare(`
+    SELECT p.*, u.name as created_by_name,
+      (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_personal = 0) as task_count
+    FROM projects p
+    LEFT JOIN users u ON u.id = p.created_by
+    ORDER BY p.created_at DESC
+  `).all();
+  res.json(projects);
+});
+
+app.post('/api/projects', authMiddleware, (req, res) => {
+  const { name, description } = req.body ?? {};
+  if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
+
+  const result = db.prepare(`
+    INSERT INTO projects (name, description, created_by)
+    VALUES (?, ?, ?)
+  `).run(name.trim(), description?.trim() || null, req.user.id);
+
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(result.lastInsertRowid);
+  res.status(201).json(project);
+});
+
 // Tasks CRUD
 app.get('/api/tasks', authMiddleware, (req, res) => {
-  const { type, assigned_to } = req.query;
+  const { type, assigned_to, project_id } = req.query;
+
+  const params = [];
   let sql = `
-    SELECT t.*, 
+    SELECT t.*, p.name as project_name,
       (SELECT json_group_array(user_id) FROM task_assignments WHERE task_id = t.id) as assigned_user_ids
     FROM tasks t
+    LEFT JOIN projects p ON p.id = t.project_id
     WHERE t.is_personal = 0
-    ORDER BY t.task_type, t.title
   `;
-  const tasks = db.prepare(sql).all();
 
-  let filtered = tasks.map(t => ({
+  if (type && VALID_TASK_TYPES.has(type)) {
+    sql += ' AND t.task_type = ?';
+    params.push(type);
+  }
+
+  if (project_id) {
+    const pid = Number(project_id);
+    if (!Number.isNaN(pid)) {
+      sql += ' AND t.project_id = ?';
+      params.push(pid);
+    }
+  }
+
+  sql += `
+    ORDER BY CASE t.workflow_status
+      WHEN 'backlog' THEN 0
+      WHEN 'todo' THEN 1
+      WHEN 'in_progress' THEN 2
+      WHEN 'done' THEN 3
+      ELSE 4 END, t.task_type, t.title
+  `;
+
+  const tasks = db.prepare(sql).all(...params).map((t) => ({
     ...t,
     assigned_user_ids: t.assigned_user_ids ? JSON.parse(t.assigned_user_ids) : [],
     is_group_task: !!t.is_group_task,
     is_all_day: t.is_all_day !== 0,
-    is_personal: !!t.is_personal
+    is_personal: !!t.is_personal,
   }));
 
-  if (type) filtered = filtered.filter(t => t.task_type === type);
-  if (assigned_to) {
-    const uid = parseInt(assigned_to);
-    if (assigned_to === 'unassigned') {
-      filtered = filtered.filter(t => !t.assigned_user_ids?.length);
-    } else if (!isNaN(uid)) {
-      filtered = filtered.filter(t => t.assigned_user_ids?.includes(uid));
-    }
+  if (!assigned_to) {
+    return res.json(tasks);
   }
 
-  res.json(filtered);
+  if (assigned_to === 'unassigned') {
+    return res.json(tasks.filter((t) => !t.assigned_user_ids?.length));
+  }
+
+  const uid = Number(assigned_to);
+  if (Number.isNaN(uid)) {
+    return res.status(400).json({ error: 'assigned_to must be a valid user id or "unassigned"' });
+  }
+
+  return res.json(tasks.filter((t) => t.assigned_user_ids?.includes(uid)));
 });
 
 app.post('/api/tasks', authMiddleware, (req, res) => {
   const {
     title, description, task_type, recurrence_pattern, default_stars,
-    is_group_task, group_id, due_date, start_time, end_time, is_all_day, is_personal, assigned_user_ids
+    is_group_task, group_id, due_date, start_time, end_time, is_all_day, is_personal, assigned_user_ids,
+    project_id, workflow_status
   } = req.body;
 
+  const normalizedTaskType = task_type || 'daily';
+  const normalizedWorkflowStatus = workflow_status || 'backlog';
+
+  if (!title?.trim()) return res.status(400).json({ error: 'title is required' });
+  if (!VALID_TASK_TYPES.has(normalizedTaskType)) return res.status(400).json({ error: 'invalid task_type' });
+  if (!WORKFLOW_STATUSES.has(normalizedWorkflowStatus)) return res.status(400).json({ error: 'invalid workflow_status' });
+
   const result = db.prepare(`
-    INSERT INTO tasks (title, description, task_type, recurrence_pattern, default_stars, is_group_task, group_id, due_date, start_time, end_time, is_all_day, is_personal, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO tasks (title, description, task_type, recurrence_pattern, default_stars, is_group_task, group_id, due_date, start_time, end_time, is_all_day, is_personal, created_by, project_id, workflow_status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     title,
     description || null,
-    task_type || 'daily',
+    normalizedTaskType,
     recurrence_pattern || null,
     default_stars ?? 1,
     is_group_task ? 1 : 0,
@@ -113,7 +176,9 @@ app.post('/api/tasks', authMiddleware, (req, res) => {
     end_time || null,
     is_all_day !== false ? 1 : 0,
     is_personal ? 1 : 0,
-    req.user.id
+    req.user.id,
+    project_id || null,
+    normalizedWorkflowStatus
   );
 
   const taskId = result.lastInsertRowid;
@@ -126,8 +191,10 @@ app.post('/api/tasks', authMiddleware, (req, res) => {
   }
 
   const task = db.prepare(`
-    SELECT t.*, (SELECT json_group_array(user_id) FROM task_assignments WHERE task_id = t.id) as assigned_user_ids
-    FROM tasks t WHERE t.id = ?
+    SELECT t.*, p.name as project_name, (SELECT json_group_array(user_id) FROM task_assignments WHERE task_id = t.id) as assigned_user_ids
+    FROM tasks t
+    LEFT JOIN projects p ON p.id = t.project_id
+    WHERE t.id = ?
   `).get(taskId);
   task.assigned_user_ids = task.assigned_user_ids ? JSON.parse(task.assigned_user_ids) : [];
   task.is_group_task = !!task.is_group_task;
@@ -153,11 +220,16 @@ app.patch('/api/tasks/:id', authMiddleware, (req, res) => {
     end_time,
     is_all_day,
     is_personal,
-    assigned_user_ids
+    assigned_user_ids,
+    project_id,
+    workflow_status
   } = req.body;
 
-  const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(id);
+  const task = db.prepare('SELECT id, project_id FROM tasks WHERE id = ?').get(id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  if (task_type && !VALID_TASK_TYPES.has(task_type)) return res.status(400).json({ error: 'invalid task_type' });
+  if (workflow_status && !WORKFLOW_STATUSES.has(workflow_status)) return res.status(400).json({ error: 'invalid workflow_status' });
 
   const safe = (v) => (v === undefined ? null : v);
 
@@ -174,7 +246,9 @@ app.patch('/api/tasks/:id', authMiddleware, (req, res) => {
       start_time = ?,
       end_time = ?,
       is_all_day = COALESCE(?, is_all_day),
-      is_personal = COALESCE(?, is_personal)
+      is_personal = COALESCE(?, is_personal),
+      project_id = ?,
+      workflow_status = COALESCE(?, workflow_status)
     WHERE id = ?
   `).run(
     safe(title),
@@ -189,6 +263,8 @@ app.patch('/api/tasks/:id', authMiddleware, (req, res) => {
     safe(end_time),
     is_all_day !== undefined ? (is_all_day ? 1 : 0) : null,
     is_personal !== undefined ? (is_personal ? 1 : 0) : null,
+    project_id === undefined ? task.project_id : project_id,
+    safe(workflow_status),
     id
   );
 
@@ -694,8 +770,9 @@ app.get('/api/insights/overview', authMiddleware, (req, res) => {
 app.get('/api/calendar/events', authMiddleware, (req, res) => {
   const { start, end } = req.query;
   const tasks = db.prepare(`
-    SELECT id, title, description, task_type, due_date, start_time, end_time, is_all_day, default_stars
-    FROM tasks
+    SELECT t.id, t.title, t.description, t.task_type, t.due_date, t.start_time, t.end_time, t.is_all_day, t.default_stars, t.project_id, p.name as project_name
+    FROM tasks t
+    LEFT JOIN projects p ON p.id = t.project_id
     WHERE is_personal = 0 AND due_date IS NOT NULL AND due_date >= ? AND due_date <= ?
   `).all(start?.slice(0, 10) || '1900-01-01', end?.slice(0, 10) || '2100-12-31');
 
@@ -705,7 +782,7 @@ app.get('/api/calendar/events', authMiddleware, (req, res) => {
     start: t.is_all_day ? t.due_date : `${t.due_date}T${t.start_time || '09:00'}`,
     end: t.is_all_day ? t.due_date : `${t.due_date}T${t.end_time || '10:00'}`,
     allDay: !!t.is_all_day,
-    resource: { type: 'task', taskId: t.id, taskType: t.task_type }
+    resource: { type: 'task', taskId: t.id, taskType: t.task_type, projectId: t.project_id, projectName: t.project_name }
   }));
 
   res.json(events);
