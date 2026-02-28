@@ -8,7 +8,7 @@ const cleanPayload = (obj) =>
   );
 
 
-export default function TaskModal({ task, users, onClose, initialDate }) {
+export default function TaskModal({ task, users, projects = [], onClose, initialDate, initialProjectId = '' }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [taskType, setTaskType] = useState('daily');
@@ -16,6 +16,7 @@ export default function TaskModal({ task, users, onClose, initialDate }) {
   const [isGroupTask, setIsGroupTask] = useState(false);
   const [assignedUserIds, setAssignedUserIds] = useState([]);
   const [dueDate, setDueDate] = useState('');
+  const [projectId, setProjectId] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -30,12 +31,16 @@ export default function TaskModal({ task, users, onClose, initialDate }) {
       setIsGroupTask(!!task.is_group_task);
       setAssignedUserIds(task.assigned_user_ids || []);
       setDueDate(task.due_date ? formatDatePST(task.due_date) : '');
+      setProjectId(task.project_id ? String(task.project_id) : '');
     } else if (initialDate) {
       // If creating from calendar click
       setTaskType('event');
       setDueDate(formatDatePST(initialDate));
+      setProjectId(initialProjectId ? String(initialProjectId) : '');
+    } else {
+      setProjectId(initialProjectId ? String(initialProjectId) : '');
     }
-  }, [task, initialDate]);
+  }, [task, initialDate, initialProjectId]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -71,6 +76,7 @@ export default function TaskModal({ task, users, onClose, initialDate }) {
           (taskType === 'one-time' || taskType === 'event') && dueDate
             ? zonedTimeToUtc(dueDate)
             : null,
+        project_id: projectId ? Number(projectId) : null,
       };
 
       // ---- strip undefined ----
@@ -203,6 +209,23 @@ export default function TaskModal({ task, users, onClose, initialDate }) {
             />
             Group task (can be done together)
           </label>
+
+          {/* Project */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Project</label>
+            <select
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+              className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-sky-500"
+            >
+              <option value="">No project</option>
+              {(projects || []).map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* Assigned users */}
           <div>

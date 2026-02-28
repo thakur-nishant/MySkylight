@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useQuery } from '../hooks/useQuery';
-import { tasks as tasksApi, users, completions } from '../api';
+import { tasks as tasksApi, users, completions, projects } from '../api';
 import { Plus, Check, Star, Filter, ChevronDown } from 'lucide-react';
 import TaskModal from '../components/TaskModal';
 import CompleteTaskModal from '../components/CompleteTaskModal';
@@ -15,20 +15,28 @@ export default function TasksPage() {
   const [editingTask, setEditingTask] = useState(null);
   const [completingTask, setCompletingTask] = useState(null);
   const [dateFilter, setDateFilter] = useState('');
+  const [projectFilter, setProjectFilter] = useState('all');
 
   const params = {};
   if (filterUser === 'unassigned') params.assigned_to = 'unassigned';
   else if (filterUser !== 'all') params.assigned_to = filterUser;
   if (filterType !== 'all') params.type = filterType;
+  if (projectFilter !== 'all') params.project_id = projectFilter;
 
   const { data: taskList = [], refetch: refetchTasks, isLoading: tasksLoading } = useQuery(
-    ['tasks', filterUser, filterType],
+    ['tasks', filterUser, filterType, projectFilter],
     () => tasksApi.list(params)
   );
 
-  const { data: userList = [], refetch: refetchUsers, isLoading: usersLoading } = useQuery(
+  const { data: userList = [], isLoading: usersLoading } = useQuery(
     ['users'],
     () => users.list()
+  );
+
+
+  const { data: projectList = [], isLoading: projectsLoading } = useQuery(
+    ['projects'],
+    () => projects.list()
   );
 
   const { data: completionList = [], refetch: refetchCompletions, isLoading: completionsLoading } = useQuery(
@@ -44,7 +52,7 @@ export default function TasksPage() {
     }
   );
 
-  const isLoading = tasksLoading || usersLoading || completionsLoading;
+  const isLoading = tasksLoading || usersLoading || completionsLoading || projectsLoading;
 
   const refetch = () => {
     refetchTasks?.();
@@ -135,6 +143,21 @@ export default function TasksPage() {
             <option value="one-time">One-time</option>
           </select>
         </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-slate-700">Project:</span>
+          <select
+            value={projectFilter}
+            onChange={(e) => setProjectFilter(e.target.value)}
+            className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-sky-500"
+          >
+            <option value="all">All projects</option>
+            {(projectList || []).map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -164,6 +187,9 @@ export default function TasksPage() {
                   </div>
                   <h3 className="font-medium text-slate-800 mt-1">{task.title}</h3>
                   <p className="text-sm text-slate-500">{getAssignedNames(task)}</p>
+                  {task.project_name && (
+                    <p className="text-xs text-indigo-600 mt-0.5">Project: {task.project_name}</p>
+                  )}
                   {task.default_stars > 0 && (
                     <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
                       <Star className="w-3 h-3 fill-amber-500" />
@@ -235,6 +261,7 @@ export default function TasksPage() {
         <TaskModal
           task={editingTask}
           users={userList || []}
+          projects={projectList || []}
           onClose={handleCloseTaskModal}
         />
       )}
