@@ -4,6 +4,7 @@ import { projects as projectsApi, tasks as tasksApi, users as usersApi } from '.
 import { useQuery } from '../hooks/useQuery';
 import { WORKFLOW_COLUMNS, WORKFLOW_STATUSES } from '../constants/workflow';
 import KanbanColumn from '../components/projects/KanbanColumn';
+import EditTaskModal from '../components/projects/EditTaskModal';
 
 const EMPTY_TASK_FORM = { title: '', due_date: '', assigned_user_ids: [] };
 
@@ -13,6 +14,8 @@ export default function ProjectDashboardPage() {
   const [newTask, setNewTask] = useState(EMPTY_TASK_FORM);
   const [error, setError] = useState('');
   const [draggedTaskId, setDraggedTaskId] = useState(null);
+  const [editingTask, setEditingTask] = useState(null);
+  const [isTaskActionLoading, setIsTaskActionLoading] = useState(false);
 
   const { data: projectsData, refetch: refetchProjects, isLoading: projectsLoading } = useQuery(
     ['projects'],
@@ -151,6 +154,48 @@ export default function ProjectDashboardPage() {
       refetchTasks?.();
     } catch (err) {
       setError(err.message || 'Failed to move task');
+    }
+  };
+
+  const openTaskEditor = (task) => {
+    setError('');
+    setEditingTask(task);
+  };
+
+  const closeTaskEditor = () => {
+    setEditingTask(null);
+    setIsTaskActionLoading(false);
+  };
+
+  const saveTaskEdits = async (form) => {
+    if (!editingTask) return;
+
+    setError('');
+    setIsTaskActionLoading(true);
+    try {
+      await tasksApi.update(editingTask.id, {
+        due_date: form.due_date || null,
+        assigned_user_ids: form.assigned_user_ids,
+        project_id: form.project_id ? Number(form.project_id) : null,
+      });
+      closeTaskEditor();
+      refetchBoard();
+    } catch (err) {
+      setError(err.message || 'Failed to update task');
+      setIsTaskActionLoading(false);
+    }
+  };
+
+  const deleteTask = async (taskId) => {
+    setError('');
+    setIsTaskActionLoading(true);
+    try {
+      await tasksApi.delete(taskId);
+      closeTaskEditor();
+      refetchBoard();
+    } catch (err) {
+      setError(err.message || 'Failed to delete task');
+      setIsTaskActionLoading(false);
     }
   };
 
@@ -329,9 +374,23 @@ export default function ProjectDashboardPage() {
               onMoveTask={moveTask}
               onDragStart={setDraggedTaskId}
               onDrop={handleDrop}
+              onEditTask={openTaskEditor}
             />
           ))}
         </div>
+      )}
+
+      {editingTask && (
+        <EditTaskModal
+          task={editingTask}
+          users={users}
+          projects={activeProjects}
+          onClose={closeTaskEditor}
+          onSave={saveTaskEdits}
+          onDelete={deleteTask}
+          saving={isTaskActionLoading}
+          error={error}
+        />
       )}
     </div>
   );
