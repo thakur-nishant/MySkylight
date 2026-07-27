@@ -17,14 +17,17 @@ import {
   Utensils,
 } from 'lucide-react';
 
-const participants = [
+const defaultParticipants = [
   { id: 'maya', name: 'Maya', color: 'from-fuchsia-500 to-rose-500', text: 'text-fuchsia-700' },
   { id: 'leo', name: 'Leo', color: 'from-sky-500 to-cyan-500', text: 'text-sky-700' },
 ];
 
-const startDate = new Date('2026-07-27T00:00:00');
-const endDate = new Date('2026-08-25T00:00:00');
-const publishDate = new Date('2026-08-26T00:00:00');
+const defaultChallenge = {
+  title: 'Couple Challenge Tracker',
+  startDate: '2026-07-27',
+  endDate: '2026-08-25',
+  publishDate: '2026-08-26',
+};
 const maxDailyPoints = 90;
 
 const defaultGoals = {
@@ -49,9 +52,20 @@ function formatDate(date) {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function buildChallengeDays() {
+function parseLocalDate(dateString) {
+  return new Date(`${dateString}T00:00:00`);
+}
+
+function getPublishDateString(endDateString) {
+  const nextDay = parseLocalDate(endDateString);
+  nextDay.setDate(nextDay.getDate() + 1);
+  return nextDay.toISOString().slice(0, 10);
+}
+
+function buildChallengeDays(startDateString, endDateString) {
   const days = [];
-  const cursor = new Date(startDate);
+  const endDate = parseLocalDate(endDateString);
+  const cursor = parseLocalDate(startDateString);
   while (cursor <= endDate) {
     days.push(new Date(cursor));
     cursor.setDate(cursor.getDate() + 1);
@@ -79,24 +93,24 @@ function calculateDailyTotal(entry, goals) {
   return scoringItems.reduce((total, item) => total + scoreMetric(entry, goals, item.key), 0);
 }
 
-function makeEntry(seed, dayIndex, goals) {
+function makeEmptyEntry() {
   return {
-    calories: goals.maxCalories - 180 + ((seed * 97 + dayIndex * 41) % 420),
-    workoutMinutes: 20 + ((seed * 11 + dayIndex * 7) % 36),
-    steps: 7600 + ((seed * 1371 + dayIndex * 821) % 8200),
-    proteinGrams: goals.proteinGrams - 25 + ((seed * 13 + dayIndex * 9) % 58),
-    waterOz: goals.waterOz - 24 + ((seed * 17 + dayIndex * 8) % 54),
-    healthyBonus: (seed + dayIndex) % 4 === 0,
-    sleepHours: Number((6.1 + ((seed + dayIndex) % 18) / 10).toFixed(1)),
+    calories: 0,
+    workoutMinutes: 0,
+    steps: 0,
+    proteinGrams: 0,
+    waterOz: 0,
+    healthyBonus: false,
+    sleepHours: 0,
   };
 }
 
-function createInitialScores(days, goals) {
-  return days.reduce((allScores, day, index) => {
+function createInitialScores(days) {
+  return days.reduce((allScores, day) => {
     const dayKey = day.toISOString().slice(0, 10);
     allScores[dayKey] = {
-      maya: makeEntry(3, index, goals.maya),
-      leo: makeEntry(8, index, goals.leo),
+      maya: makeEmptyEntry(),
+      leo: makeEmptyEntry(),
     };
     return allScores;
   }, {});
@@ -112,10 +126,16 @@ function ProgressBar({ value, max = maxDailyPoints, gradient = 'from-emerald-400
 }
 
 export default function ChallengeTrackerPage() {
-  const days = useMemo(buildChallengeDays, []);
+  const [challenge, setChallenge] = useState(defaultChallenge);
+  const [draftChallenge, setDraftChallenge] = useState(defaultChallenge);
+  const [participants, setParticipants] = useState(defaultParticipants);
+  const [draftParticipants, setDraftParticipants] = useState(defaultParticipants);
+  const [showChallengeForm, setShowChallengeForm] = useState(false);
+  const days = useMemo(() => buildChallengeDays(challenge.startDate, challenge.endDate), [challenge.startDate, challenge.endDate]);
   const [goals, setGoals] = useState(defaultGoals);
-  const [selectedDay, setSelectedDay] = useState(days[0].toISOString().slice(0, 10));
-  const [scores, setScores] = useState(() => createInitialScores(days, defaultGoals));
+  const [draftGoals, setDraftGoals] = useState(defaultGoals);
+  const [selectedDay, setSelectedDay] = useState(defaultChallenge.startDate);
+  const [scores, setScores] = useState(() => createInitialScores(buildChallengeDays(defaultChallenge.startDate, defaultChallenge.endDate)));
 
   const dailyTotals = participants.map((participant) => ({
     ...participant,
@@ -161,11 +181,34 @@ export default function ChallengeTrackerPage() {
     }));
   };
 
-  const updateGoal = (participantId, key, value) => {
-    setGoals((current) => ({
+  const updateDraftGoal = (participantId, key, value) => {
+    setDraftGoals((current) => ({
       ...current,
       [participantId]: { ...current[participantId], [key]: value },
     }));
+  };
+
+  const updateDraftParticipant = (participantId, value) => {
+    setDraftParticipants((current) => current.map((participant) => (
+      participant.id === participantId ? { ...participant, name: value } : participant
+    )));
+  };
+
+  const saveChallenge = () => {
+    const nextDays = buildChallengeDays(draftChallenge.startDate, draftChallenge.endDate);
+    setChallenge(draftChallenge);
+    setParticipants(draftParticipants);
+    setGoals(draftGoals);
+    setSelectedDay(draftChallenge.startDate);
+    setScores(createInitialScores(nextDays));
+    setShowChallengeForm(false);
+  };
+
+  const openChallengeForm = () => {
+    setDraftChallenge(challenge);
+    setDraftParticipants(participants);
+    setDraftGoals(goals);
+    setShowChallengeForm(true);
   };
 
   const leader = leaderboard[0];
@@ -179,15 +222,16 @@ export default function ChallengeTrackerPage() {
             <div className="grid gap-8 lg:grid-cols-[1.4fr_.6fr] lg:items-center">
               <div>
                 <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm font-semibold text-cyan-100">
-                  <Sparkles className="h-4 w-4" /> Couple Challenge Tracker
+                  <Sparkles className="h-4 w-4" /> {challenge.title}
                 </div>
                 <h1 className="font-display text-4xl font-black leading-tight md:text-6xl">30 days. 2 players. Personalized goals.</h1>
                 <p className="mt-4 max-w-2xl text-lg text-slate-200">Set each participant’s daily max calories, water minimum, protein target, and workout goal, then track the habits that keep the challenge fair and motivating.</p>
                 <div className="mt-6 flex flex-wrap gap-3 text-sm font-semibold">
-                  <span className="rounded-full bg-white px-4 py-2 text-slate-900"><CalendarDays className="mr-2 inline h-4 w-4" />{formatDate(startDate)} – {formatDate(endDate)}</span>
-                  <span className="rounded-full bg-amber-300 px-4 py-2 text-amber-950"><PartyPopper className="mr-2 inline h-4 w-4" />Results publish {formatDate(publishDate)}</span>
+                  <span className="rounded-full bg-white px-4 py-2 text-slate-900"><CalendarDays className="mr-2 inline h-4 w-4" />{formatDate(parseLocalDate(challenge.startDate))} – {formatDate(parseLocalDate(challenge.endDate))}</span>
+                  <span className="rounded-full bg-amber-300 px-4 py-2 text-amber-950"><PartyPopper className="mr-2 inline h-4 w-4" />Results publish {formatDate(parseLocalDate(challenge.publishDate))}</span>
                   <span className="rounded-full bg-emerald-300 px-4 py-2 text-emerald-950">Sleep is tracked, not scored</span>
                 </div>
+                <button type="button" onClick={openChallengeForm} className="mt-6 rounded-full bg-white px-5 py-3 font-black text-slate-900 shadow-lg transition hover:-translate-y-0.5">Edit Challenge</button>
               </div>
               <div className="rounded-3xl bg-white p-5 text-slate-900 shadow-xl">
                 <div className="flex items-center justify-between"><span className="text-sm font-semibold text-slate-500">Current leader</span><Trophy className="h-7 w-7 text-amber-500" /></div>
@@ -199,13 +243,15 @@ export default function ChallengeTrackerPage() {
             </div>
           </section>
 
+          {showChallengeForm && (
           <section className="rounded-3xl bg-white p-5 shadow-lg">
-            <h2 className="mb-2 text-xl font-black">Participant goal setup</h2>
-            <p className="mb-4 text-sm text-slate-500">Use personalized daily targets so each person can compete against goals that fit their plan.</p>
+            <h2 className="mb-2 text-xl font-black">Challenge creation form</h2>
+            <p className="mb-4 text-sm text-slate-500">Edit participant names, challenge dates, and personalized daily targets. Saving resets daily entries to 0 for the selected date range.</p>
+            <div className="mb-4 grid gap-3 md:grid-cols-3"><label className="block rounded-2xl bg-slate-50 p-3"><span className="mb-2 block text-sm font-bold text-slate-600">Challenge title</span><input value={draftChallenge.title} onChange={(event) => setDraftChallenge((current) => ({ ...current, title: event.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 font-semibold" /></label><label className="block rounded-2xl bg-slate-50 p-3"><span className="mb-2 block text-sm font-bold text-slate-600">Start date</span><input type="date" value={draftChallenge.startDate} onChange={(event) => setDraftChallenge((current) => ({ ...current, startDate: event.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 font-semibold" /></label><label className="block rounded-2xl bg-slate-50 p-3"><span className="mb-2 block text-sm font-bold text-slate-600">End date</span><input type="date" value={draftChallenge.endDate} onChange={(event) => setDraftChallenge((current) => ({ ...current, endDate: event.target.value, publishDate: getPublishDateString(event.target.value) }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 font-semibold" /></label></div>
             <div className="grid gap-4 md:grid-cols-2">
-              {participants.map((participant) => (
+              {draftParticipants.map((participant) => (
                 <div key={participant.id} className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
-                  <h3 className={`mb-4 text-2xl font-black ${participant.text}`}>{participant.name} goals</h3>
+                  <label className="mb-4 block"><span className="mb-2 block text-sm font-bold text-slate-600">Participant name</span><input value={participant.name} onChange={(event) => updateDraftParticipant(participant.id, event.target.value)} className={`w-full rounded-xl border border-slate-200 px-3 py-2 text-2xl font-black ${participant.text}`} /></label>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {scoringItems.filter((item) => item.key !== 'healthyBonus').map((item) => (
                       <label key={item.key} className="block rounded-2xl bg-white p-3 shadow-sm">
@@ -213,8 +259,8 @@ export default function ChallengeTrackerPage() {
                         <input
                           type="number"
                           min="0"
-                          value={goals[participant.id][item.key === 'calories' ? 'maxCalories' : item.key]}
-                          onChange={(event) => updateGoal(participant.id, item.key === 'calories' ? 'maxCalories' : item.key, Number(event.target.value))}
+                          value={draftGoals[participant.id][item.key === 'calories' ? 'maxCalories' : item.key]}
+                          onChange={(event) => updateDraftGoal(participant.id, item.key === 'calories' ? 'maxCalories' : item.key, Number(event.target.value))}
                           className="w-full rounded-xl border border-slate-200 px-3 py-2 font-semibold"
                         />
                       </label>
@@ -223,7 +269,9 @@ export default function ChallengeTrackerPage() {
                 </div>
               ))}
             </div>
+          <div className="mt-5 flex flex-wrap gap-3"><button type="button" onClick={saveChallenge} className="rounded-2xl bg-slate-900 px-5 py-3 font-black text-white">Save challenge</button><button type="button" onClick={() => setShowChallengeForm(false)} className="rounded-2xl border border-slate-200 px-5 py-3 font-black text-slate-700">Cancel</button></div>
           </section>
+          )}
 
           <section className="grid gap-4 lg:grid-cols-7">
             <div className="rounded-3xl bg-white p-5 shadow-lg lg:col-span-2">
@@ -251,12 +299,12 @@ export default function ChallengeTrackerPage() {
                     <div className="mb-4 flex items-center justify-between"><h3 className={`text-2xl font-black ${participant.text}`}>{participant.name}</h3><span className="rounded-full bg-white px-3 py-1 text-lg font-black shadow-sm">{total}/{maxDailyPoints}</span></div>
                     <ProgressBar value={total} gradient={participant.color} />
                     <div className="mt-4 space-y-3">
-                      <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Flame className="h-4 w-4" />Calories eaten</span><span>{scoreMetric(entry, participantGoals, 'calories')} pts</span></span><input type="number" min="0" value={entry.calories} onChange={(e) => updateScore(participant.id, 'calories', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /><p className="mt-1 text-xs text-slate-500">Goal: at or under {participantGoals.maxCalories} calories.</p></label>
-                      <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Dumbbell className="h-4 w-4" />Workout minutes</span><span>{scoreMetric(entry, participantGoals, 'workoutMinutes')} pts</span></span><input type="number" min="0" value={entry.workoutMinutes} onChange={(e) => updateScore(participant.id, 'workoutMinutes', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /></label>
-                      <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Footprints className="h-4 w-4" />Steps</span><span>{scoreSteps(entry.steps)} pts</span></span><input type="number" min="0" step="500" value={entry.steps} onChange={(e) => updateScore(participant.id, 'steps', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /><p className="mt-1 text-xs text-slate-500">Under 8k = 0, 8–9.9k = 8, then rounded down by 1k up to 15.</p></label>
-                      <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Utensils className="h-4 w-4" />Protein grams</span><span>{scoreMetric(entry, participantGoals, 'proteinGrams')} pts</span></span><input type="number" min="0" value={entry.proteinGrams} onChange={(e) => updateScore(participant.id, 'proteinGrams', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /></label>
-                      <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Droplets className="h-4 w-4" />Water ounces</span><span>{scoreMetric(entry, participantGoals, 'waterOz')} pts</span></span><input type="number" min="0" value={entry.waterOz} onChange={(e) => updateScore(participant.id, 'waterOz', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /></label>
-                      <label className="block rounded-2xl bg-indigo-50 p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold text-indigo-800"><span className="flex items-center gap-2"><Moon className="h-4 w-4" />Sleep hours</span><span>0 pts</span></span><input type="number" min="0" step="0.1" value={entry.sleepHours} onChange={(e) => updateScore(participant.id, 'sleepHours', Number(e.target.value))} className="w-full rounded-xl border border-indigo-100 px-3 py-2" /><p className="mt-1 text-xs text-indigo-700">Shown for wellness context only; no score impact.</p></label>
+                      <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Flame className="h-4 w-4" />Calories eaten <em className="font-semibold not-italic text-slate-500">(goal ≤ {participantGoals.maxCalories})</em></span><span>{scoreMetric(entry, participantGoals, 'calories')} pts</span></span><input type="number" min="0" value={entry.calories} onChange={(e) => updateScore(participant.id, 'calories', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /><p className="mt-1 text-xs text-slate-500">Goal: at or under {participantGoals.maxCalories} calories.</p></label>
+                      <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Dumbbell className="h-4 w-4" />Workout minutes <em className="font-semibold not-italic text-slate-500">(goal ≥ {participantGoals.workoutMinutes})</em></span><span>{scoreMetric(entry, participantGoals, 'workoutMinutes')} pts</span></span><input type="number" min="0" value={entry.workoutMinutes} onChange={(e) => updateScore(participant.id, 'workoutMinutes', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /></label>
+                      <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Footprints className="h-4 w-4" />Steps <em className="font-semibold not-italic text-slate-500">(goal {participantGoals.minSteps.toLocaleString()})</em></span><span>{scoreSteps(entry.steps)} pts</span></span><input type="number" min="0" step="500" value={entry.steps} onChange={(e) => updateScore(participant.id, 'steps', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /><p className="mt-1 text-xs text-slate-500">Under 8k = 0, 8–9.9k = 8, then rounded down by 1k up to 15.</p></label>
+                      <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Utensils className="h-4 w-4" />Protein grams <em className="font-semibold not-italic text-slate-500">(goal ≥ {participantGoals.proteinGrams}g)</em></span><span>{scoreMetric(entry, participantGoals, 'proteinGrams')} pts</span></span><input type="number" min="0" value={entry.proteinGrams} onChange={(e) => updateScore(participant.id, 'proteinGrams', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /></label>
+                      <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Droplets className="h-4 w-4" />Water ounces <em className="font-semibold not-italic text-slate-500">(goal ≥ {participantGoals.waterOz} oz)</em></span><span>{scoreMetric(entry, participantGoals, 'waterOz')} pts</span></span><input type="number" min="0" value={entry.waterOz} onChange={(e) => updateScore(participant.id, 'waterOz', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /></label>
+                      <label className="block rounded-2xl bg-indigo-50 p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold text-indigo-800"><span className="flex items-center gap-2"><Moon className="h-4 w-4" />Sleep hours <em className="font-semibold not-italic text-indigo-600">(wellness only)</em></span><span>0 pts</span></span><input type="number" min="0" step="0.1" value={entry.sleepHours} onChange={(e) => updateScore(participant.id, 'sleepHours', Number(e.target.value))} className="w-full rounded-xl border border-indigo-100 px-3 py-2" /><p className="mt-1 text-xs text-indigo-700">Shown for wellness context only; no score impact.</p></label>
                       <label className="flex cursor-pointer items-center justify-between rounded-2xl bg-white p-3 shadow-sm transition hover:-translate-y-0.5"><span className="flex items-center gap-2 font-medium"><HeartPulse className="h-4 w-4 text-slate-500" />Healthy eating bonus</span><input type="checkbox" checked={entry.healthyBonus} onChange={(e) => updateScore(participant.id, 'healthyBonus', e.target.checked)} className="h-5 w-5 rounded text-sky-600" /></label>
                     </div>
                   </div>;
@@ -280,7 +328,7 @@ export default function ChallengeTrackerPage() {
           <section className="grid gap-4 lg:grid-cols-3">
             <div className="rounded-3xl bg-gradient-to-br from-amber-300 to-orange-400 p-6 text-amber-950 shadow-lg lg:col-span-2">
               <h2 className="flex items-center gap-2 text-2xl font-black"><Trophy className="h-7 w-7" /> Final winner section</h2>
-              <p className="mt-2 text-lg font-semibold">If the challenge ended today, {leader.name} would take the crown. Official results auto-publish on {formatDate(publishDate)}.</p>
+              <p className="mt-2 text-lg font-semibold">If the challenge ended today, {leader.name} would take the crown. Official results auto-publish on {formatDate(parseLocalDate(challenge.publishDate))}.</p>
               <div className="mt-4 rounded-2xl bg-white/55 p-4 font-bold">Power Couple Bonus days so far: {powerCoupleDays}</div>
             </div>
             <div className="rounded-3xl bg-white p-6 shadow-lg">
