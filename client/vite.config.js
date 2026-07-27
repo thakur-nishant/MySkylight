@@ -5,6 +5,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: true,
+    allowedHosts: ['oneplus-6t.boar-gorgon.ts.net'],
     port: 5173,
     proxy: {
       '/api': {
