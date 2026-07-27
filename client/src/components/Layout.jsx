@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Calendar, ListTodo, BarChart3, LogOut, ChevronsLeft, ChevronsRight, ClipboardCheck, KanbanSquare } from 'lucide-react';
+import { Calendar, ListTodo, BarChart3, LogOut, ChevronsLeft, ChevronsRight, ClipboardCheck, KanbanSquare, Trophy } from 'lucide-react';
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -20,6 +20,7 @@ export default function Layout() {
     { to: '/tasks', icon: ListTodo, label: 'Tasks' },
     { to: '/projects', icon: KanbanSquare, label: 'Project Dashboard' },
     { to: '/personal-tracker', icon: ClipboardCheck, label: 'Personal Tracker' },
+    { to: '/challenge-tracker', icon: Trophy, label: 'Challenge Tracker' },
     { to: '/insights', icon: BarChart3, label: 'Insights' },
   ];
 
