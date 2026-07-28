@@ -724,6 +724,190 @@ app.patch('/api/completions', authMiddleware, (req, res) => {
 
 
 
+function loadChallengeTrackerState(userId) {
+  const challenge = db.prepare(`
+    SELECT id, title, start_date as startDate, end_date as endDate, publish_date as publishDate
+    FROM challenges
+    WHERE created_by = ?
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(userId);
+
+  if (!challenge) return null;
+
+  const participants = db.prepare(`
+    SELECT participant_key as id, name, color, text_class as text
+    FROM challenge_participants
+    WHERE challenge_id = ?
+    ORDER BY display_order, participant_key
+  `).all(challenge.id);
+
+  const goalRows = db.prepare(`
+    SELECT participant_key as participantKey, max_calories as maxCalories, workout_minutes as workoutMinutes,
+      min_steps as minSteps, protein_grams as proteinGrams, water_liters as waterLiters
+    FROM challenge_goals
+    WHERE challenge_id = ?
+  `).all(challenge.id);
+
+  const goals = {};
+  for (const row of goalRows) {
+    goals[row.participantKey] = {
+      maxCalories: row.maxCalories,
+      workoutMinutes: row.workoutMinutes,
+      minSteps: row.minSteps,
+      proteinGrams: row.proteinGrams,
+      waterLiters: row.waterLiters,
+    };
+  }
+
+  const entryRows = db.prepare(`
+    SELECT entry_date as entryDate, participant_key as participantKey, calories, workout_minutes as workoutMinutes,
+      steps, protein_grams as proteinGrams, water_liters as waterLiters, healthy_bonus as healthyBonus, sleep_hours as sleepHours
+    FROM challenge_daily_entries
+    WHERE challenge_id = ?
+  `).all(challenge.id);
+
+  const scores = {};
+  for (const row of entryRows) {
+    if (!scores[row.entryDate]) scores[row.entryDate] = {};
+    scores[row.entryDate][row.participantKey] = {
+      calories: row.calories,
+      workoutMinutes: row.workoutMinutes,
+      steps: row.steps,
+      proteinGrams: row.proteinGrams,
+      waterLiters: row.waterLiters,
+      healthyBonus: !!row.healthyBonus,
+      sleepHours: row.sleepHours,
+    };
+  }
+
+  return { challengeId: challenge.id, challenge, participants, goals, scores };
+}
+
+function saveChallengeConfig(userId, { challenge, participants, goals }) {
+  let challengeId = db.prepare(`
+    SELECT id FROM challenges WHERE created_by = ? ORDER BY id DESC LIMIT 1
+  `).get(userId)?.id;
+
+  if (challengeId) {
+    db.prepare(`
+      UPDATE challenges
+      SET title = ?, start_date = ?, end_date = ?, publish_date = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(challenge.title, challenge.startDate, challenge.endDate, challenge.publishDate, challengeId);
+    db.prepare('DELETE FROM challenge_participants WHERE challenge_id = ?').run(challengeId);
+    db.prepare('DELETE FROM challenge_goals WHERE challenge_id = ?').run(challengeId);
+  } else {
+    const result = db.prepare(`
+      INSERT INTO challenges (title, start_date, end_date, publish_date, created_by)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(challenge.title, challenge.startDate, challenge.endDate, challenge.publishDate, userId);
+    challengeId = result.lastInsertRowid;
+  }
+
+  const insertParticipant = db.prepare(`
+    INSERT INTO challenge_participants (challenge_id, participant_key, name, color, text_class, display_order)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  participants.forEach((participant, index) => {
+    insertParticipant.run(challengeId, participant.id, participant.name, participant.color, participant.text, index);
+  });
+
+  const insertGoal = db.prepare(`
+    INSERT INTO challenge_goals (challenge_id, participant_key, max_calories, workout_minutes, min_steps, protein_grams, water_liters)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  for (const participant of participants) {
+    const goal = goals[participant.id] || {};
+    insertGoal.run(
+      challengeId,
+      participant.id,
+      goal.maxCalories ?? 0,
+      goal.workoutMinutes ?? 0,
+      goal.minSteps ?? 0,
+      goal.proteinGrams ?? 0,
+      goal.waterLiters ?? 0,
+    );
+  }
+
+  return challengeId;
+}
+
+app.get('/api/challenge-tracker', authMiddleware, (req, res) => {
+  const state = loadChallengeTrackerState(req.user.id);
+  if (!state) return res.status(404).json({ error: 'No saved challenge' });
+  res.json(state);
+});
+
+app.put('/api/challenge-tracker', authMiddleware, (req, res) => {
+  const { challenge, participants, goals } = req.body;
+  if (!challenge?.startDate || !challenge?.endDate || !Array.isArray(participants) || !goals) {
+    return res.status(400).json({ error: 'challenge, participants, and goals are required' });
+  }
+
+  const challengeId = saveChallengeConfig(req.user.id, { challenge, participants, goals });
+  const state = loadChallengeTrackerState(req.user.id);
+  res.json({ ...state, challengeId });
+});
+
+app.put('/api/challenge-tracker/entries', authMiddleware, (req, res) => {
+  const { date, participantId, entry } = req.body;
+  if (!date || !participantId || !entry) {
+    return res.status(400).json({ error: 'date, participantId, and entry are required' });
+  }
+
+  let challengeId = db.prepare(`
+    SELECT id FROM challenges WHERE created_by = ? ORDER BY id DESC LIMIT 1
+  `).get(req.user.id)?.id;
+
+  if (!challengeId) {
+    return res.status(404).json({ error: 'Save challenge settings before logging daily entries' });
+  }
+
+  const existing = db.prepare(`
+    SELECT id FROM challenge_daily_entries
+    WHERE challenge_id = ? AND entry_date = ? AND participant_key = ?
+  `).get(challengeId, date, participantId);
+
+  if (existing) {
+    db.prepare(`
+      UPDATE challenge_daily_entries
+      SET calories = ?, workout_minutes = ?, steps = ?, protein_grams = ?, water_liters = ?,
+        healthy_bonus = ?, sleep_hours = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      entry.calories ?? 0,
+      entry.workoutMinutes ?? 0,
+      entry.steps ?? 0,
+      entry.proteinGrams ?? 0,
+      entry.waterLiters ?? 0,
+      entry.healthyBonus ? 1 : 0,
+      entry.sleepHours ?? 0,
+      existing.id,
+    );
+  } else {
+    db.prepare(`
+      INSERT INTO challenge_daily_entries (
+        challenge_id, entry_date, participant_key, calories, workout_minutes, steps,
+        protein_grams, water_liters, healthy_bonus, sleep_hours
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      challengeId,
+      date,
+      participantId,
+      entry.calories ?? 0,
+      entry.workoutMinutes ?? 0,
+      entry.steps ?? 0,
+      entry.proteinGrams ?? 0,
+      entry.waterLiters ?? 0,
+      entry.healthyBonus ? 1 : 0,
+      entry.sleepHours ?? 0,
+    );
+  }
+
+  res.json({ success: true });
+});
+
 // Insights & analytics
 app.get('/api/insights/scores', authMiddleware, (req, res) => {
   const { start_date, end_date } = req.query;

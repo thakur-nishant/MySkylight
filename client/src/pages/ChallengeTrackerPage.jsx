@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Award,
   CalendarDays,
@@ -16,6 +16,7 @@ import {
   Trophy,
   Utensils,
 } from 'lucide-react';
+import { challengeTracker } from '../api';
 
 const defaultParticipants = [
   { id: 'maya', name: 'Maya', color: 'from-fuchsia-500 to-rose-500', text: 'text-fuchsia-700' },
@@ -31,8 +32,8 @@ const defaultChallenge = {
 const maxDailyPoints = 90;
 
 const defaultGoals = {
-  maya: { maxCalories: 1650, workoutMinutes: 30, minSteps: 10000, proteinGrams: 120, waterOz: 80 },
-  leo: { maxCalories: 2100, workoutMinutes: 30, minSteps: 10000, proteinGrams: 150, waterOz: 100 },
+  maya: { maxCalories: 1650, workoutMinutes: 30, minSteps: 10000, proteinGrams: 120, waterLiters: 2.4 },
+  leo: { maxCalories: 2100, workoutMinutes: 30, minSteps: 10000, proteinGrams: 150, waterLiters: 3 },
 };
 
 const scoringItems = [
@@ -40,7 +41,7 @@ const scoringItems = [
   { key: 'workoutMinutes', label: 'Workout minutes met', points: 20, icon: Dumbbell, goalLabel: 'Workout min minutes' },
   { key: 'steps', label: 'Steps', points: 15, icon: Footprints, goalLabel: 'Step goal reference' },
   { key: 'proteinGrams', label: 'Protein goal met', points: 15, icon: Utensils, goalLabel: 'Protein min grams' },
-  { key: 'waterOz', label: 'Water goal met', points: 10, icon: Droplets, goalLabel: 'Water min ounces' },
+  { key: 'waterLiters', label: 'Water goal met', points: 10, icon: Droplets, goalLabel: 'Water min liters' },
   { key: 'healthyBonus', label: 'Healthy eating bonus', points: 5, icon: HeartPulse, goalLabel: 'Manual daily bonus' },
 ];
 
@@ -73,9 +74,21 @@ function buildChallengeDays(startDateString, endDateString) {
   return days;
 }
 
+function formatDayKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function goalFieldKey(itemKey) {
+  if (itemKey === 'calories') return 'maxCalories';
+  if (itemKey === 'steps') return 'minSteps';
+  return itemKey;
+}
+
 function scoreSteps(steps) {
   if (steps < 8000) return 0;
-  if (steps < 10000) return 8;
   return Math.min(15, Math.floor(steps / 1000));
 }
 
@@ -84,7 +97,7 @@ function scoreMetric(entry, goals, key) {
   if (key === 'workoutMinutes') return entry.workoutMinutes >= goals.workoutMinutes ? 20 : 0;
   if (key === 'steps') return scoreSteps(Number(entry.steps) || 0);
   if (key === 'proteinGrams') return entry.proteinGrams >= goals.proteinGrams ? 15 : 0;
-  if (key === 'waterOz') return entry.waterOz >= goals.waterOz ? 10 : 0;
+  if (key === 'waterLiters') return entry.waterLiters >= goals.waterLiters ? 10 : 0;
   if (key === 'healthyBonus') return entry.healthyBonus ? 5 : 0;
   return 0;
 }
@@ -99,21 +112,34 @@ function makeEmptyEntry() {
     workoutMinutes: 0,
     steps: 0,
     proteinGrams: 0,
-    waterOz: 0,
+    waterLiters: 0,
     healthyBonus: false,
     sleepHours: 0,
   };
 }
 
-function createInitialScores(days) {
+function createInitialScores(days, participantIds) {
+  const ids = participantIds?.length ? participantIds : defaultParticipants.map((p) => p.id);
   return days.reduce((allScores, day) => {
-    const dayKey = day.toISOString().slice(0, 10);
-    allScores[dayKey] = {
-      maya: makeEmptyEntry(),
-      leo: makeEmptyEntry(),
-    };
+    const dayKey = formatDayKey(day);
+    allScores[dayKey] = ids.reduce((entries, participantId) => {
+      entries[participantId] = makeEmptyEntry();
+      return entries;
+    }, {});
     return allScores;
   }, {});
+}
+
+function mergeScoresForDays(currentScores, days, participantIds) {
+  const merged = { ...currentScores };
+  for (const day of days) {
+    const dayKey = formatDayKey(day);
+    merged[dayKey] = { ...(merged[dayKey] || {}) };
+    for (const participantId of participantIds) {
+      merged[dayKey][participantId] = { ...makeEmptyEntry(), ...(merged[dayKey][participantId] || {}) };
+    }
+  }
+  return merged;
 }
 
 function ProgressBar({ value, max = maxDailyPoints, gradient = 'from-emerald-400 to-teal-500' }) {
@@ -135,25 +161,69 @@ export default function ChallengeTrackerPage() {
   const [goals, setGoals] = useState(defaultGoals);
   const [draftGoals, setDraftGoals] = useState(defaultGoals);
   const [selectedDay, setSelectedDay] = useState(defaultChallenge.startDate);
-  const [scores, setScores] = useState(() => createInitialScores(buildChallengeDays(defaultChallenge.startDate, defaultChallenge.endDate)));
+  const [scores, setScores] = useState(() => createInitialScores(
+    buildChallengeDays(defaultChallenge.startDate, defaultChallenge.endDate),
+    defaultParticipants.map((p) => p.id),
+  ));
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const state = await challengeTracker.load();
+        if (cancelled || !state) return;
+
+        const participantIds = state.participants.map((participant) => participant.id);
+        const challengeDays = buildChallengeDays(state.challenge.startDate, state.challenge.endDate);
+
+        setChallenge(state.challenge);
+        setDraftChallenge(state.challenge);
+        setParticipants(state.participants);
+        setDraftParticipants(state.participants);
+        setGoals(state.goals);
+        setDraftGoals(state.goals);
+        setScores(mergeScoresForDays(state.scores, challengeDays, participantIds));
+        setSelectedDay(state.challenge.startDate);
+      } catch (error) {
+        if (error.message === 'No saved challenge') {
+          try {
+            await challengeTracker.saveConfig({
+              challenge: defaultChallenge,
+              participants: defaultParticipants,
+              goals: defaultGoals,
+            });
+          } catch (seedError) {
+            console.error('Failed to initialize challenge tracker', seedError);
+          }
+        } else {
+          console.error('Failed to load challenge tracker', error);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const dailyTotals = participants.map((participant) => ({
     ...participant,
-    total: calculateDailyTotal(scores[selectedDay][participant.id], goals[participant.id]),
+    total: calculateDailyTotal(scores[selectedDay]?.[participant.id] || makeEmptyEntry(), goals[participant.id]),
   }));
 
   const leaderboard = participants.map((participant) => {
     const total = days.reduce((sum, day) => {
-      const dayKey = day.toISOString().slice(0, 10);
-      return sum + calculateDailyTotal(scores[dayKey][participant.id], goals[participant.id]);
+      const dayKey = formatDayKey(day);
+      return sum + calculateDailyTotal(scores[dayKey]?.[participant.id] || makeEmptyEntry(), goals[participant.id]);
     }, 0);
     return { ...participant, total, average: Math.round(total / days.length) };
   }).sort((a, b) => b.total - a.total);
 
   const maxChallengePoints = days.length * maxDailyPoints;
   const powerCoupleDays = days.filter((day) => {
-    const key = day.toISOString().slice(0, 10);
-    return participants.every((participant) => calculateDailyTotal(scores[key][participant.id], goals[participant.id]) >= 80);
+    const key = formatDayKey(day);
+    return participants.every((participant) => calculateDailyTotal(scores[key]?.[participant.id] || makeEmptyEntry(), goals[participant.id]) >= 80);
   }).length;
 
   const weeklySummary = Array.from({ length: Math.ceil(days.length / 7) }, (_, weekIndex) => {
@@ -164,21 +234,35 @@ export default function ChallengeTrackerPage() {
       totals: participants.map((participant) => ({
         ...participant,
         total: weekDays.reduce((sum, day) => {
-          const dayKey = day.toISOString().slice(0, 10);
-          return sum + calculateDailyTotal(scores[dayKey][participant.id], goals[participant.id]);
+          const dayKey = formatDayKey(day);
+          return sum + calculateDailyTotal(scores[dayKey]?.[participant.id] || makeEmptyEntry(), goals[participant.id]);
         }, 0),
       })),
     };
   });
 
   const updateScore = (participantId, key, value) => {
-    setScores((current) => ({
-      ...current,
-      [selectedDay]: {
-        ...current[selectedDay],
-        [participantId]: { ...current[selectedDay][participantId], [key]: value },
-      },
-    }));
+    setScores((current) => {
+      const dayScores = current[selectedDay] || {};
+      const participantEntry = { ...(dayScores[participantId] || makeEmptyEntry()), [key]: value };
+      const next = {
+        ...current,
+        [selectedDay]: {
+          ...dayScores,
+          [participantId]: participantEntry,
+        },
+      };
+
+      challengeTracker.saveEntry({
+        date: selectedDay,
+        participantId,
+        entry: participantEntry,
+      }).catch((error) => {
+        console.error('Failed to save daily entry', error);
+      });
+
+      return next;
+    });
   };
 
   const updateDraftGoal = (participantId, key, value) => {
@@ -194,13 +278,26 @@ export default function ChallengeTrackerPage() {
     )));
   };
 
-  const saveChallenge = () => {
+  const saveChallenge = async () => {
     const nextDays = buildChallengeDays(draftChallenge.startDate, draftChallenge.endDate);
+    const participantIds = draftParticipants.map((participant) => participant.id);
+
+    try {
+      await challengeTracker.saveConfig({
+        challenge: draftChallenge,
+        participants: draftParticipants,
+        goals: draftGoals,
+      });
+    } catch (error) {
+      console.error('Failed to save challenge', error);
+      return;
+    }
+
     setChallenge(draftChallenge);
     setParticipants(draftParticipants);
     setGoals(draftGoals);
     setSelectedDay(draftChallenge.startDate);
-    setScores(createInitialScores(nextDays));
+    setScores((current) => mergeScoresForDays(current, nextDays, participantIds));
     setShowChallengeForm(false);
   };
 
@@ -246,7 +343,7 @@ export default function ChallengeTrackerPage() {
           {showChallengeForm && (
           <section className="rounded-3xl bg-white p-5 shadow-lg">
             <h2 className="mb-2 text-xl font-black">Challenge creation form</h2>
-            <p className="mb-4 text-sm text-slate-500">Edit participant names, challenge dates, and personalized daily targets. Saving resets daily entries to 0 for the selected date range.</p>
+            <p className="mb-4 text-sm text-slate-500">Edit participant names, challenge dates, and personalized daily targets. Saving keeps your logged daily entries.</p>
             <div className="mb-4 grid gap-3 md:grid-cols-3"><label className="block rounded-2xl bg-slate-50 p-3"><span className="mb-2 block text-sm font-bold text-slate-600">Challenge title</span><input value={draftChallenge.title} onChange={(event) => setDraftChallenge((current) => ({ ...current, title: event.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 font-semibold" /></label><label className="block rounded-2xl bg-slate-50 p-3"><span className="mb-2 block text-sm font-bold text-slate-600">Start date</span><input type="date" value={draftChallenge.startDate} onChange={(event) => setDraftChallenge((current) => ({ ...current, startDate: event.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 font-semibold" /></label><label className="block rounded-2xl bg-slate-50 p-3"><span className="mb-2 block text-sm font-bold text-slate-600">End date</span><input type="date" value={draftChallenge.endDate} onChange={(event) => setDraftChallenge((current) => ({ ...current, endDate: event.target.value, publishDate: getPublishDateString(event.target.value) }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 font-semibold" /></label></div>
             <div className="grid gap-4 md:grid-cols-2">
               {draftParticipants.map((participant) => (
@@ -259,8 +356,8 @@ export default function ChallengeTrackerPage() {
                         <input
                           type="number"
                           min="0"
-                          value={draftGoals[participant.id][item.key === 'calories' ? 'maxCalories' : item.key]}
-                          onChange={(event) => updateDraftGoal(participant.id, item.key === 'calories' ? 'maxCalories' : item.key, Number(event.target.value))}
+                          value={draftGoals[participant.id][goalFieldKey(item.key)]}
+                          onChange={(event) => updateDraftGoal(participant.id, goalFieldKey(item.key), Number(event.target.value))}
                           className="w-full rounded-xl border border-slate-200 px-3 py-2 font-semibold"
                         />
                       </label>
@@ -287,12 +384,12 @@ export default function ChallengeTrackerPage() {
               <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div><h2 className="text-xl font-black">Daily score tracker</h2><p className="text-sm text-slate-500">Pick a day, then enter each participant’s actual calories, water, protein, steps, workout, and sleep.</p></div>
                 <select value={selectedDay} onChange={(event) => setSelectedDay(event.target.value)} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 font-semibold shadow-sm">
-                  {days.map((day) => <option key={day.toISOString()} value={day.toISOString().slice(0, 10)}>{day.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</option>)}
+                  {days.map((day) => <option key={formatDayKey(day)} value={formatDayKey(day)}>{day.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</option>)}
                 </select>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 {participants.map((participant) => {
-                  const entry = scores[selectedDay][participant.id];
+                  const entry = scores[selectedDay]?.[participant.id] || makeEmptyEntry();
                   const participantGoals = goals[participant.id];
                   const total = calculateDailyTotal(entry, participantGoals);
                   return <div key={participant.id} className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
@@ -301,9 +398,9 @@ export default function ChallengeTrackerPage() {
                     <div className="mt-4 space-y-3">
                       <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Flame className="h-4 w-4" />Calories eaten <em className="font-semibold not-italic text-slate-500">(goal ≤ {participantGoals.maxCalories})</em></span><span>{scoreMetric(entry, participantGoals, 'calories')} pts</span></span><input type="number" min="0" value={entry.calories} onChange={(e) => updateScore(participant.id, 'calories', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /><p className="mt-1 text-xs text-slate-500">Goal: at or under {participantGoals.maxCalories} calories.</p></label>
                       <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Dumbbell className="h-4 w-4" />Workout minutes <em className="font-semibold not-italic text-slate-500">(goal ≥ {participantGoals.workoutMinutes})</em></span><span>{scoreMetric(entry, participantGoals, 'workoutMinutes')} pts</span></span><input type="number" min="0" value={entry.workoutMinutes} onChange={(e) => updateScore(participant.id, 'workoutMinutes', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /></label>
-                      <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Footprints className="h-4 w-4" />Steps <em className="font-semibold not-italic text-slate-500">(goal {participantGoals.minSteps.toLocaleString()})</em></span><span>{scoreSteps(entry.steps)} pts</span></span><input type="number" min="0" step="500" value={entry.steps} onChange={(e) => updateScore(participant.id, 'steps', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /><p className="mt-1 text-xs text-slate-500">Under 8k = 0, 8–9.9k = 8, then rounded down by 1k up to 15.</p></label>
+                      <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Footprints className="h-4 w-4" />Steps <em className="font-semibold not-italic text-slate-500">(goal {participantGoals.minSteps.toLocaleString()})</em></span><span>{scoreSteps(entry.steps)} pts</span></span><input type="number" min="0" step="500" value={entry.steps} onChange={(e) => updateScore(participant.id, 'steps', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /><p className="mt-1 text-xs text-slate-500">Under 8k = 0, then 1 point per full 1k (8k → 8 pts, 9k → 9 pts), max 15.</p></label>
                       <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Utensils className="h-4 w-4" />Protein grams <em className="font-semibold not-italic text-slate-500">(goal ≥ {participantGoals.proteinGrams}g)</em></span><span>{scoreMetric(entry, participantGoals, 'proteinGrams')} pts</span></span><input type="number" min="0" value={entry.proteinGrams} onChange={(e) => updateScore(participant.id, 'proteinGrams', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /></label>
-                      <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Droplets className="h-4 w-4" />Water ounces <em className="font-semibold not-italic text-slate-500">(goal ≥ {participantGoals.waterOz} oz)</em></span><span>{scoreMetric(entry, participantGoals, 'waterOz')} pts</span></span><input type="number" min="0" value={entry.waterOz} onChange={(e) => updateScore(participant.id, 'waterOz', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /></label>
+                      <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Droplets className="h-4 w-4" />Water liters <em className="font-semibold not-italic text-slate-500">(goal ≥ {participantGoals.waterLiters} L)</em></span><span>{scoreMetric(entry, participantGoals, 'waterLiters')} pts</span></span><input type="number" min="0" step="0.1" value={entry.waterLiters} onChange={(e) => updateScore(participant.id, 'waterLiters', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /></label>
                       <label className="block rounded-2xl bg-indigo-50 p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold text-indigo-800"><span className="flex items-center gap-2"><Moon className="h-4 w-4" />Sleep hours <em className="font-semibold not-italic text-indigo-600">(wellness only)</em></span><span>0 pts</span></span><input type="number" min="0" step="0.1" value={entry.sleepHours} onChange={(e) => updateScore(participant.id, 'sleepHours', Number(e.target.value))} className="w-full rounded-xl border border-indigo-100 px-3 py-2" /><p className="mt-1 text-xs text-indigo-700">Shown for wellness context only; no score impact.</p></label>
                       <label className="flex cursor-pointer items-center justify-between rounded-2xl bg-white p-3 shadow-sm transition hover:-translate-y-0.5"><span className="flex items-center gap-2 font-medium"><HeartPulse className="h-4 w-4 text-slate-500" />Healthy eating bonus</span><input type="checkbox" checked={entry.healthyBonus} onChange={(e) => updateScore(participant.id, 'healthyBonus', e.target.checked)} className="h-5 w-5 rounded text-sky-600" /></label>
                     </div>

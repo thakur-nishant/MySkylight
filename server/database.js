@@ -166,6 +166,57 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_habits_user ON habits(user_id);
   CREATE INDEX IF NOT EXISTS idx_habit_logs_habit ON habit_logs(habit_id);
   CREATE INDEX IF NOT EXISTS idx_habit_logs_date ON habit_logs(date);
+
+  CREATE TABLE IF NOT EXISTS challenges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    publish_date DATE NOT NULL,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS challenge_participants (
+    challenge_id INTEGER NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,
+    participant_key TEXT NOT NULL,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL,
+    text_class TEXT NOT NULL,
+    display_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (challenge_id, participant_key)
+  );
+
+  CREATE TABLE IF NOT EXISTS challenge_goals (
+    challenge_id INTEGER NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,
+    participant_key TEXT NOT NULL,
+    max_calories INTEGER NOT NULL DEFAULT 0,
+    workout_minutes INTEGER NOT NULL DEFAULT 0,
+    min_steps INTEGER NOT NULL DEFAULT 0,
+    protein_grams INTEGER NOT NULL DEFAULT 0,
+    water_liters REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (challenge_id, participant_key)
+  );
+
+  CREATE TABLE IF NOT EXISTS challenge_daily_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    challenge_id INTEGER NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,
+    entry_date DATE NOT NULL,
+    participant_key TEXT NOT NULL,
+    calories INTEGER NOT NULL DEFAULT 0,
+    workout_minutes INTEGER NOT NULL DEFAULT 0,
+    steps INTEGER NOT NULL DEFAULT 0,
+    protein_grams INTEGER NOT NULL DEFAULT 0,
+    water_liters REAL NOT NULL DEFAULT 0,
+    healthy_bonus INTEGER NOT NULL DEFAULT 0,
+    sleep_hours REAL NOT NULL DEFAULT 0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(challenge_id, entry_date, participant_key)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_challenges_created_by ON challenges(created_by);
+  CREATE INDEX IF NOT EXISTS idx_challenge_daily_entries_date ON challenge_daily_entries(challenge_id, entry_date);
 `);
 
 // Backward-compatible migration for existing databases.

@@ -158,3 +158,9 @@ export const tracker = {
   deleteHabit: (id) => api(`/tracker/habits/${id}`, { method: 'DELETE' }),
   toggleHabit: (id, data) => api(`/tracker/habits/${id}/toggle`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
+
+export const challengeTracker = {
+  load: () => api('/challenge-tracker'),
+  saveConfig: (data) => api('/challenge-tracker', { method: 'PUT', body: JSON.stringify(data) }),
+  saveEntry: (data) => api('/challenge-tracker/entries', { method: 'PUT', body: JSON.stringify(data) }),
+};
