@@ -160,7 +160,9 @@ export const tracker = {
 };
 
 export const challengeTracker = {
+  list: () => api('/challenge-tracker/list'),
   load: () => api('/challenge-tracker'),
+  loadById: (id) => api(`/challenge-tracker/${id}`),
   saveConfig: (data) => api('/challenge-tracker', { method: 'PUT', body: JSON.stringify(data) }),
   saveEntry: (data) => api('/challenge-tracker/entries', { method: 'PUT', body: JSON.stringify(data) }),
 };
