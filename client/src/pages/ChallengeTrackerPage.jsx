@@ -19,8 +19,8 @@ import {
 import { challengeTracker } from '../api';
 
 const defaultParticipants = [
-  { id: 'maya', name: 'Maya', color: 'from-fuchsia-500 to-rose-500', text: 'text-fuchsia-700' },
-  { id: 'leo', name: 'Leo', color: 'from-sky-500 to-cyan-500', text: 'text-sky-700' },
+  { id: 'demo@myskylight.app', email: 'demo@myskylight.app', name: 'Demo User', color: 'from-fuchsia-500 to-rose-500', text: 'text-fuchsia-700' },
+  { id: 'family@myskylight.app', email: 'family@myskylight.app', name: 'Family Member', color: 'from-sky-500 to-cyan-500', text: 'text-sky-700' },
 ];
 
 const defaultChallenge = {
@@ -32,8 +32,8 @@ const defaultChallenge = {
 const maxDailyPoints = 90;
 
 const defaultGoals = {
-  maya: { maxCalories: 1650, workoutMinutes: 30, minSteps: 10000, proteinGrams: 120, waterLiters: 2.4 },
-  leo: { maxCalories: 2100, workoutMinutes: 30, minSteps: 10000, proteinGrams: 150, waterLiters: 3 },
+  'demo@myskylight.app': { maxCalories: 1650, workoutMinutes: 30, minSteps: 10000, proteinGrams: 120, waterLiters: 2.4 },
+  'family@myskylight.app': { maxCalories: 2100, workoutMinutes: 30, minSteps: 10000, proteinGrams: 150, waterLiters: 3 },
 };
 
 const scoringItems = [
@@ -272,10 +272,38 @@ export default function ChallengeTrackerPage() {
     }));
   };
 
-  const updateDraftParticipant = (participantId, value) => {
-    setDraftParticipants((current) => current.map((participant) => (
-      participant.id === participantId ? { ...participant, name: value } : participant
-    )));
+  const updateDraftParticipant = (participantId, field, value) => {
+    if (field === 'name') {
+      setDraftParticipants((current) => current.map((participant) => (
+        participant.id === participantId ? { ...participant, name: value } : participant
+      )));
+      return;
+    }
+
+    if (field === 'email') {
+      const newEmail = (value || '').trim();
+      const newId = newEmail ? newEmail.toLowerCase() : participantId;
+
+      // Update participants list (id and email)
+      setDraftParticipants((current) => current.map((participant) => (
+        participant.id === participantId ? { ...participant, email: newEmail, id: newId } : participant
+      )));
+
+      // Move goals from old id to new id if necessary
+      setDraftGoals((current) => {
+        if (!newId || newId === participantId) return current;
+        const next = { ...current };
+        next[newId] = next[participantId] || {
+          maxCalories: 0,
+          workoutMinutes: 0,
+          minSteps: 0,
+          proteinGrams: 0,
+          waterLiters: 0,
+        };
+        if (participantId in next) delete next[participantId];
+        return next;
+      });
+    }
   };
 
   const saveChallenge = async () => {
@@ -348,7 +376,22 @@ export default function ChallengeTrackerPage() {
             <div className="grid gap-4 md:grid-cols-2">
               {draftParticipants.map((participant) => (
                 <div key={participant.id} className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
-                  <label className="mb-4 block"><span className="mb-2 block text-sm font-bold text-slate-600">Participant name</span><input value={participant.name} onChange={(event) => updateDraftParticipant(participant.id, event.target.value)} className={`w-full rounded-xl border border-slate-200 px-3 py-2 text-2xl font-black ${participant.text}`} /></label>
+                  <label className="mb-4 block">
+                      <span className="mb-2 block text-sm font-bold text-slate-600">Participant name</span>
+                      <input
+                        value={participant.name}
+                        onChange={(event) => updateDraftParticipant(participant.id, 'name', event.target.value)}
+                        className={`w-full rounded-xl border border-slate-200 px-3 py-2 text-2xl font-black ${participant.text}`}
+                      />
+                      <span className="mb-2 mt-3 block text-sm font-bold text-slate-600">Participant email (optional — used for sharing)</span>
+                      <input
+                        type="email"
+                        value={participant.email || ''}
+                        onChange={(event) => updateDraftParticipant(participant.id, 'email', event.target.value)}
+                        placeholder="name@example.com"
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold"
+                      />
+                    </label>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {scoringItems.filter((item) => item.key !== 'healthyBonus').map((item) => (
                       <label key={item.key} className="block rounded-2xl bg-white p-3 shadow-sm">
@@ -393,7 +436,7 @@ export default function ChallengeTrackerPage() {
                   const participantGoals = goals[participant.id];
                   const total = calculateDailyTotal(entry, participantGoals);
                   return <div key={participant.id} className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
-                    <div className="mb-4 flex items-center justify-between"><h3 className={`text-2xl font-black ${participant.text}`}>{participant.name}</h3><span className="rounded-full bg-white px-3 py-1 text-lg font-black shadow-sm">{total}/{maxDailyPoints}</span></div>
+                    <div className="mb-4 flex items-center justify-between"><div><h3 className={`text-2xl font-black ${participant.text}`}>{participant.name}</h3>{participant.email && <p className="mt-1 text-xs font-medium text-slate-500">{participant.email}</p>}</div><span className="rounded-full bg-white px-3 py-1 text-lg font-black shadow-sm">{total}/{maxDailyPoints}</span></div>
                     <ProgressBar value={total} gradient={participant.color} />
                     <div className="mt-4 space-y-3">
                       <label className="block rounded-2xl bg-white p-3 shadow-sm"><span className="mb-2 flex items-center justify-between text-sm font-bold"><span className="flex items-center gap-2"><Flame className="h-4 w-4" />Calories eaten <em className="font-semibold not-italic text-slate-500">(goal ≤ {participantGoals.maxCalories})</em></span><span>{scoreMetric(entry, participantGoals, 'calories')} pts</span></span><input type="number" min="0" value={entry.calories} onChange={(e) => updateScore(participant.id, 'calories', Number(e.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2" /><p className="mt-1 text-xs text-slate-500">Goal: at or under {participantGoals.maxCalories} calories.</p></label>

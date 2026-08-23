@@ -724,19 +724,21 @@ app.patch('/api/completions', authMiddleware, (req, res) => {
 
 
 
-function loadChallengeTrackerState(userId) {
+function loadChallengeTrackerState(userId, userEmail) {
+  const normalizedEmail = (userEmail || '').trim().toLowerCase();
   const challenge = db.prepare(`
-    SELECT id, title, start_date as startDate, end_date as endDate, publish_date as publishDate
-    FROM challenges
-    WHERE created_by = ?
-    ORDER BY id DESC
+    SELECT c.id, c.title, c.start_date as startDate, c.end_date as endDate, c.publish_date as publishDate
+    FROM challenges c
+    LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
+    WHERE c.created_by = ? OR cp.participant_key = ?
+    ORDER BY c.id DESC
     LIMIT 1
-  `).get(userId);
+  `).get(userId, normalizedEmail);
 
   if (!challenge) return null;
 
   const participants = db.prepare(`
-    SELECT participant_key as id, name, color, text_class as text
+    SELECT participant_key as id, participant_key as email, name, color, text_class as text
     FROM challenge_participants
     WHERE challenge_id = ?
     ORDER BY display_order, participant_key
@@ -785,6 +787,31 @@ function loadChallengeTrackerState(userId) {
 }
 
 function saveChallengeConfig(userId, { challenge, participants, goals }) {
+  const normalizedParticipants = (participants || []).map((participant, index) => {
+    const rawId = participant?.id || participant?.email || `participant-${index + 1}`;
+    const participantId = String(rawId).trim().toLowerCase();
+    const email = String(participant?.email || participantId).trim().toLowerCase();
+    return {
+      id: participantId,
+      email,
+      name: String(participant?.name || email || 'Participant').trim(),
+      color: participant?.color || '#6366f1',
+      text: participant?.text || 'text-slate-700',
+    };
+  });
+
+  const normalizedGoals = {};
+  for (const participant of normalizedParticipants) {
+    const goal = goals?.[participant.id] || goals?.[participant.email] || {};
+    normalizedGoals[participant.id] = {
+      maxCalories: Number(goal.maxCalories ?? 0),
+      workoutMinutes: Number(goal.workoutMinutes ?? 0),
+      minSteps: Number(goal.minSteps ?? 0),
+      proteinGrams: Number(goal.proteinGrams ?? 0),
+      waterLiters: Number(goal.waterLiters ?? 0),
+    };
+  }
+
   let challengeId = db.prepare(`
     SELECT id FROM challenges WHERE created_by = ? ORDER BY id DESC LIMIT 1
   `).get(userId)?.id;
@@ -809,7 +836,7 @@ function saveChallengeConfig(userId, { challenge, participants, goals }) {
     INSERT INTO challenge_participants (challenge_id, participant_key, name, color, text_class, display_order)
     VALUES (?, ?, ?, ?, ?, ?)
   `);
-  participants.forEach((participant, index) => {
+  normalizedParticipants.forEach((participant, index) => {
     insertParticipant.run(challengeId, participant.id, participant.name, participant.color, participant.text, index);
   });
 
@@ -817,8 +844,8 @@ function saveChallengeConfig(userId, { challenge, participants, goals }) {
     INSERT INTO challenge_goals (challenge_id, participant_key, max_calories, workout_minutes, min_steps, protein_grams, water_liters)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
-  for (const participant of participants) {
-    const goal = goals[participant.id] || {};
+  for (const participant of normalizedParticipants) {
+    const goal = normalizedGoals[participant.id] || {};
     insertGoal.run(
       challengeId,
       participant.id,
@@ -834,7 +861,7 @@ function saveChallengeConfig(userId, { challenge, participants, goals }) {
 }
 
 app.get('/api/challenge-tracker', authMiddleware, (req, res) => {
-  const state = loadChallengeTrackerState(req.user.id);
+  const state = loadChallengeTrackerState(req.user.id, req.user.email);
   if (!state) return res.status(404).json({ error: 'No saved challenge' });
   res.json(state);
 });
@@ -846,19 +873,24 @@ app.put('/api/challenge-tracker', authMiddleware, (req, res) => {
   }
 
   const challengeId = saveChallengeConfig(req.user.id, { challenge, participants, goals });
-  const state = loadChallengeTrackerState(req.user.id);
+  const state = loadChallengeTrackerState(req.user.id, req.user.email);
   res.json({ ...state, challengeId });
 });
 
 app.put('/api/challenge-tracker/entries', authMiddleware, (req, res) => {
   const { date, participantId, entry } = req.body;
-  if (!date || !participantId || !entry) {
+  const normalizedParticipantId = String(participantId || '').trim().toLowerCase();
+  if (!date || !normalizedParticipantId || !entry) {
     return res.status(400).json({ error: 'date, participantId, and entry are required' });
   }
 
+  const normalizedEmail = (req.user.email || '').trim().toLowerCase();
   let challengeId = db.prepare(`
-    SELECT id FROM challenges WHERE created_by = ? ORDER BY id DESC LIMIT 1
-  `).get(req.user.id)?.id;
+    SELECT c.id FROM challenges c
+    LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
+    WHERE c.created_by = ? OR cp.participant_key = ?
+    ORDER BY c.id DESC LIMIT 1
+  `).get(req.user.id, normalizedEmail)?.id;
 
   if (!challengeId) {
     return res.status(404).json({ error: 'Save challenge settings before logging daily entries' });
@@ -867,7 +899,7 @@ app.put('/api/challenge-tracker/entries', authMiddleware, (req, res) => {
   const existing = db.prepare(`
     SELECT id FROM challenge_daily_entries
     WHERE challenge_id = ? AND entry_date = ? AND participant_key = ?
-  `).get(challengeId, date, participantId);
+  `).get(challengeId, date, normalizedParticipantId);
 
   if (existing) {
     db.prepare(`
@@ -894,7 +926,7 @@ app.put('/api/challenge-tracker/entries', authMiddleware, (req, res) => {
     `).run(
       challengeId,
       date,
-      participantId,
+      normalizedParticipantId,
       entry.calories ?? 0,
       entry.workoutMinutes ?? 0,
       entry.steps ?? 0,
