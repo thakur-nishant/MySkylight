@@ -967,19 +967,36 @@ app.put('/api/challenge-tracker', authMiddleware, (req, res) => {
 });
 
 app.put('/api/challenge-tracker/entries', authMiddleware, (req, res) => {
-  const { date, participantId, entry } = req.body;
+  const { date, participantId, entry, challengeId: selectedChallengeId } = req.body;
   const normalizedParticipantId = String(participantId || '').trim().toLowerCase();
   if (!date || !normalizedParticipantId || !entry) {
     return res.status(400).json({ error: 'date, participantId, and entry are required' });
   }
 
   const normalizedEmail = (req.user.email || '').trim().toLowerCase();
-  let challengeId = db.prepare(`
-    SELECT c.id FROM challenges c
-    LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
-    WHERE c.created_by = ? OR cp.participant_key = ?
-    ORDER BY c.id DESC LIMIT 1
-  `).get(req.user.id, normalizedEmail)?.id;
+  const requestedChallengeId = selectedChallengeId ? Number(selectedChallengeId) : null;
+
+  let challengeId = requestedChallengeId;
+  if (!challengeId) {
+    challengeId = db.prepare(`
+      SELECT c.id FROM challenges c
+      LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
+      WHERE c.created_by = ? OR LOWER(cp.participant_key) = ?
+      ORDER BY c.id DESC LIMIT 1
+    `).get(req.user.id, normalizedEmail)?.id;
+  } else {
+    const challengeAccess = db.prepare(`
+      SELECT c.id
+      FROM challenges c
+      LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
+      WHERE c.id = ? AND (c.created_by = ? OR LOWER(cp.participant_key) = ?)
+      LIMIT 1
+    `).get(challengeId, req.user.id, normalizedEmail);
+
+    if (!challengeAccess) {
+      return res.status(404).json({ error: 'Challenge not found or access denied' });
+    }
+  }
 
   if (!challengeId) {
     return res.status(404).json({ error: 'Save challenge settings before logging daily entries' });
@@ -1026,7 +1043,7 @@ app.put('/api/challenge-tracker/entries', authMiddleware, (req, res) => {
     );
   }
 
-  res.json({ success: true });
+  res.json({ success: true, challengeId });
 });
 
 // Insights & analytics
