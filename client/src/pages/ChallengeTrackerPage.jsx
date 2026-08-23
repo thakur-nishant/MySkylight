@@ -153,6 +153,7 @@ function ProgressBar({ value, max = maxDailyPoints, gradient = 'from-emerald-400
 
 export default function ChallengeTrackerPage() {
   const [challenge, setChallenge] = useState(defaultChallenge);
+  const [challengeId, setChallengeId] = useState(null);
   const [draftChallenge, setDraftChallenge] = useState(defaultChallenge);
   const [participants, setParticipants] = useState(defaultParticipants);
   const [draftParticipants, setDraftParticipants] = useState(defaultParticipants);
@@ -178,6 +179,7 @@ export default function ChallengeTrackerPage() {
         const challengeDays = buildChallengeDays(state.challenge.startDate, state.challenge.endDate);
 
         setChallenge(state.challenge);
+        setChallengeId(state.challengeId ?? null);
         setDraftChallenge(state.challenge);
         setParticipants(state.participants);
         setDraftParticipants(state.participants);
@@ -311,11 +313,13 @@ export default function ChallengeTrackerPage() {
     const participantIds = draftParticipants.map((participant) => participant.id);
 
     try {
-      await challengeTracker.saveConfig({
+      const saved = await challengeTracker.saveConfig({
+        challengeId,
         challenge: draftChallenge,
         participants: draftParticipants,
         goals: draftGoals,
       });
+      if (saved?.challengeId) setChallengeId(saved.challengeId);
     } catch (error) {
       console.error('Failed to save challenge', error);
       return;
@@ -338,6 +342,10 @@ export default function ChallengeTrackerPage() {
 
   const leader = leaderboard[0];
   const runnerUp = leaderboard[1];
+  const sharedWith = participants
+    .map((participant) => participant.email || participant.name)
+    .filter(Boolean)
+    .filter((value, index, arr) => arr.indexOf(value) === index);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-900">
@@ -356,6 +364,11 @@ export default function ChallengeTrackerPage() {
                   <span className="rounded-full bg-amber-300 px-4 py-2 text-amber-950"><PartyPopper className="mr-2 inline h-4 w-4" />Results publish {formatDate(parseLocalDate(challenge.publishDate))}</span>
                   <span className="rounded-full bg-emerald-300 px-4 py-2 text-emerald-950">Sleep is tracked, not scored</span>
                 </div>
+                {sharedWith.length > 0 && (
+                  <div className="mt-5 rounded-2xl border border-white/20 bg-slate-900/20 px-4 py-3 text-sm text-slate-100 backdrop-blur-sm">
+                    <span className="font-semibold text-cyan-100">Shared with:</span> {sharedWith.join(', ')}
+                  </div>
+                )}
                 <button type="button" onClick={openChallengeForm} className="mt-6 rounded-full bg-white px-5 py-3 font-black text-slate-900 shadow-lg transition hover:-translate-y-0.5">Edit Challenge</button>
               </div>
               <div className="rounded-3xl bg-white p-5 text-slate-900 shadow-xl">

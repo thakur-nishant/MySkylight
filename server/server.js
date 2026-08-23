@@ -786,7 +786,7 @@ function loadChallengeTrackerState(userId, userEmail) {
   return { challengeId: challenge.id, challenge, participants, goals, scores };
 }
 
-function saveChallengeConfig(userId, { challenge, participants, goals }) {
+function saveChallengeConfig(userId, { challenge, participants, goals, challengeId: explicitChallengeId }) {
   const normalizedParticipants = (participants || []).map((participant, index) => {
     const rawId = participant?.id || participant?.email || `participant-${index + 1}`;
     const participantId = String(rawId).trim().toLowerCase();
@@ -812,9 +812,28 @@ function saveChallengeConfig(userId, { challenge, participants, goals }) {
     };
   }
 
-  let challengeId = db.prepare(`
+  let challengeId = explicitChallengeId ? Number(explicitChallengeId) : db.prepare(`
     SELECT id FROM challenges WHERE created_by = ? ORDER BY id DESC LIMIT 1
   `).get(userId)?.id;
+
+  if (challengeId) {
+    const ownedChallenge = db.prepare(`
+      SELECT id FROM challenges WHERE id = ? AND created_by = ?
+    `).get(challengeId, userId);
+
+    if (!ownedChallenge) {
+      const participantMatch = db.prepare(`
+        SELECT c.id
+        FROM challenges c
+        JOIN challenge_participants cp ON cp.challenge_id = c.id
+        WHERE c.id = ? AND cp.participant_key = ?
+      `).get(challengeId, (userId || '').toString().toLowerCase());
+
+      if (!participantMatch) {
+        challengeId = null;
+      }
+    }
+  }
 
   if (challengeId) {
     db.prepare(`
@@ -867,12 +886,12 @@ app.get('/api/challenge-tracker', authMiddleware, (req, res) => {
 });
 
 app.put('/api/challenge-tracker', authMiddleware, (req, res) => {
-  const { challenge, participants, goals } = req.body;
+  const { challenge, participants, goals, challengeId: existingChallengeId } = req.body;
   if (!challenge?.startDate || !challenge?.endDate || !Array.isArray(participants) || !goals) {
     return res.status(400).json({ error: 'challenge, participants, and goals are required' });
   }
 
-  const challengeId = saveChallengeConfig(req.user.id, { challenge, participants, goals });
+  const challengeId = saveChallengeConfig(req.user.id, { challenge, participants, goals, challengeId: existingChallengeId });
   const state = loadChallengeTrackerState(req.user.id, req.user.email);
   res.json({ ...state, challengeId });
 });
