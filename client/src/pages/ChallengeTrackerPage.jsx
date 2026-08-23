@@ -401,6 +401,36 @@ export default function ChallengeTrackerPage() {
     }
   };
 
+  const deleteChallengeCard = async (event, challengeMeta) => {
+    event.stopPropagation();
+    if (!challengeMeta?.id) return;
+    const confirmed = window.confirm('Delete this challenge? This removes all saved entries for it.');
+    if (!confirmed) return;
+
+    try {
+      await challengeTracker.delete(challengeMeta.id);
+      if (selectedChallengeId === challengeMeta.id) {
+        setSelectedChallengeId(null);
+        setChallengeId(null);
+        setChallenge(defaultChallenge);
+        setParticipants(defaultParticipants);
+        setDraftChallenge(defaultChallenge);
+        setDraftParticipants(defaultParticipants);
+        setGoals(defaultGoals);
+        setDraftGoals(defaultGoals);
+        setShowChallengeForm(false);
+        setSelectedDay(defaultChallenge.startDate);
+        setScores(createInitialScores(
+          buildChallengeDays(defaultChallenge.startDate, defaultChallenge.endDate),
+          defaultParticipants.map((p) => p.id),
+        ));
+      }
+      await refreshChallengeList();
+    } catch (error) {
+      console.error('Failed to delete challenge', error);
+    }
+  };
+
   const startNewChallenge = () => {
     setSelectedChallengeId(null);
     setChallengeId(null);
@@ -468,24 +498,37 @@ export default function ChallengeTrackerPage() {
                     </div>
                   ) : (
                     challengeList.active.map((challengeItem) => (
-                      <button
+                      <div
                         key={challengeItem.id}
-                        type="button"
-                        onClick={() => openChallenge(challengeItem)}
                         className="group rounded-3xl border border-slate-200 bg-white p-5 text-left shadow-lg transition hover:-translate-y-1 hover:shadow-xl"
                       >
-                        <div className="mb-3 flex items-center justify-between">
-                          <span className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1 text-xs font-bold text-sky-700">
-                            <Trophy className="h-3.5 w-3.5" /> Active
-                          </span>
-                          <span className="text-xs font-semibold text-slate-500">{formatDate(parseLocalDate(challengeItem.startDate))} – {formatDate(parseLocalDate(challengeItem.endDate))}</span>
+                        <button
+                          type="button"
+                          onClick={() => openChallenge(challengeItem)}
+                          className="w-full text-left"
+                        >
+                          <div className="mb-3 flex items-center justify-between">
+                            <span className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1 text-xs font-bold text-sky-700">
+                              <Trophy className="h-3.5 w-3.5" /> Active
+                            </span>
+                            <span className="text-xs font-semibold text-slate-500">{formatDate(parseLocalDate(challengeItem.startDate))} – {formatDate(parseLocalDate(challengeItem.endDate))}</span>
+                          </div>
+                          <h2 className="text-2xl font-black text-slate-900">{challengeItem.title}</h2>
+                          <p className="mt-3 text-sm text-slate-500">Results publish {formatDate(parseLocalDate(challengeItem.publishDate))}</p>
+                          <div className="mt-4 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600">
+                            <span className="font-semibold text-slate-700">Shared with:</span> {challengeItem.sharedWith?.length ? challengeItem.sharedWith.join(', ') : 'Only you'}
+                          </div>
+                        </button>
+                        <div className="mt-4 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={(event) => deleteChallengeCard(event, challengeItem)}
+                            className="rounded-full border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-600 transition hover:bg-red-100"
+                          >
+                            Delete
+                          </button>
                         </div>
-                        <h2 className="text-2xl font-black text-slate-900">{challengeItem.title}</h2>
-                        <p className="mt-3 text-sm text-slate-500">Results publish {formatDate(parseLocalDate(challengeItem.publishDate))}</p>
-                        <div className="mt-4 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600">
-                          <span className="font-semibold text-slate-700">Shared with:</span> {challengeItem.sharedWith?.length ? challengeItem.sharedWith.join(', ') : 'Only you'}
-                        </div>
-                      </button>
+                      </div>
                     ))
                   )}
                 </div>
@@ -502,23 +545,36 @@ export default function ChallengeTrackerPage() {
                     </div>
                   ) : (
                     challengeList.past.map((challengeItem) => (
-                      <button
+                      <div
                         key={challengeItem.id}
-                        type="button"
-                        onClick={() => openChallenge(challengeItem)}
                         className="group rounded-3xl border border-slate-200 bg-white p-5 text-left shadow-lg transition hover:-translate-y-1 hover:shadow-xl"
                       >
-                        <div className="mb-3 flex items-center justify-between">
-                          <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
-                            <CalendarDays className="h-3.5 w-3.5" /> Past
-                          </span>
-                          <span className="text-xs font-semibold text-slate-500">{formatDate(parseLocalDate(challengeItem.startDate))} – {formatDate(parseLocalDate(challengeItem.endDate))}</span>
+                        <button
+                          type="button"
+                          onClick={() => openChallenge(challengeItem)}
+                          className="w-full text-left"
+                        >
+                          <div className="mb-3 flex items-center justify-between">
+                            <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
+                              <CalendarDays className="h-3.5 w-3.5" /> Past
+                            </span>
+                            <span className="text-xs font-semibold text-slate-500">{formatDate(parseLocalDate(challengeItem.startDate))} – {formatDate(parseLocalDate(challengeItem.endDate))}</span>
+                          </div>
+                          <h2 className="text-2xl font-black text-slate-900">{challengeItem.title}</h2>
+                          <div className="mt-4 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600">
+                            <span className="font-semibold text-slate-700">Shared with:</span> {challengeItem.sharedWith?.length ? challengeItem.sharedWith.join(', ') : 'Only you'}
+                          </div>
+                        </button>
+                        <div className="mt-4 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={(event) => deleteChallengeCard(event, challengeItem)}
+                            className="rounded-full border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-600 transition hover:bg-red-100"
+                          >
+                            Delete
+                          </button>
                         </div>
-                        <h2 className="text-2xl font-black text-slate-900">{challengeItem.title}</h2>
-                        <div className="mt-4 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600">
-                          <span className="font-semibold text-slate-700">Shared with:</span> {challengeItem.sharedWith?.length ? challengeItem.sharedWith.join(', ') : 'Only you'}
-                        </div>
-                      </button>
+                      </div>
                     ))
                   )}
                 </div>
