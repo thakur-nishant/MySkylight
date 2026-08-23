@@ -165,4 +165,5 @@ export const challengeTracker = {
   loadById: (id) => api(`/challenge-tracker/${id}`),
   saveConfig: (data) => api('/challenge-tracker', { method: 'PUT', body: JSON.stringify(data) }),
   saveEntry: (data) => api('/challenge-tracker/entries', { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id) => api(`/challenge-tracker/${id}`, { method: 'DELETE' }),
 };

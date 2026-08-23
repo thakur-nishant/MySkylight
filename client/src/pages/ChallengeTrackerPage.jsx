@@ -374,6 +374,33 @@ export default function ChallengeTrackerPage() {
     setShowChallengeForm(true);
   };
 
+  const deleteSelectedChallenge = async () => {
+    if (!challengeId) return;
+    const confirmed = window.confirm('Delete this challenge? This removes all saved entries for it.');
+    if (!confirmed) return;
+
+    try {
+      await challengeTracker.delete(challengeId);
+      setSelectedChallengeId(null);
+      setChallengeId(null);
+      setChallenge(defaultChallenge);
+      setParticipants(defaultParticipants);
+      setDraftChallenge(defaultChallenge);
+      setDraftParticipants(defaultParticipants);
+      setGoals(defaultGoals);
+      setDraftGoals(defaultGoals);
+      setShowChallengeForm(false);
+      setSelectedDay(defaultChallenge.startDate);
+      setScores(createInitialScores(
+        buildChallengeDays(defaultChallenge.startDate, defaultChallenge.endDate),
+        defaultParticipants.map((p) => p.id),
+      ));
+      await refreshChallengeList();
+    } catch (error) {
+      console.error('Failed to delete challenge', error);
+    }
+  };
+
   const startNewChallenge = () => {
     setSelectedChallengeId(null);
     setChallengeId(null);
@@ -412,8 +439,8 @@ export default function ChallengeTrackerPage() {
 
   if (!selectedChallengeId && !showChallengeForm) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-900">
-        <div className="bg-[radial-gradient(circle_at_top_left,#38bdf8_0,transparent_35%),radial-gradient(circle_at_top_right,#f472b6_0,transparent_30%),linear-gradient(180deg,#0f172a_0%,#f8fafc_42%)] px-4 py-6 sm:px-6 lg:px-8">
+      <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#38bdf8_0,transparent_35%),radial-gradient(circle_at_top_right,#f472b6_0,transparent_30%),linear-gradient(180deg,#0f172a_0%,#f8fafc_42%)] text-slate-900">
+        <div className="px-4 py-6 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-7xl space-y-6">
             <section className="overflow-hidden rounded-[2rem] border border-white/20 bg-white/10 p-6 text-white shadow-2xl backdrop-blur md:p-8">
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -504,8 +531,8 @@ export default function ChallengeTrackerPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-900">
-      <div className="bg-[radial-gradient(circle_at_top_left,#38bdf8_0,transparent_35%),radial-gradient(circle_at_top_right,#f472b6_0,transparent_30%),linear-gradient(180deg,#0f172a_0%,#f8fafc_42%)] px-4 py-6 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#38bdf8_0,transparent_35%),radial-gradient(circle_at_top_right,#f472b6_0,transparent_30%),linear-gradient(180deg,#0f172a_0%,#f8fafc_42%)] text-slate-900">
+      <div className="px-4 py-6 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl space-y-6">
           <section className="overflow-hidden rounded-[2rem] border border-white/20 bg-white/10 p-6 text-white shadow-2xl backdrop-blur md:p-8">
             <div className="grid gap-8 lg:grid-cols-[1.4fr_.6fr] lg:items-center">
@@ -525,7 +552,10 @@ export default function ChallengeTrackerPage() {
                     <span className="font-semibold text-cyan-100">Shared with:</span> {sharedWith.join(', ')}
                   </div>
                 )}
-                <button type="button" onClick={openChallengeForm} className="mt-6 rounded-full bg-white px-5 py-3 font-black text-slate-900 shadow-lg transition hover:-translate-y-0.5">Edit Challenge</button>
+                <div className="mt-6 flex flex-wrap gap-3">
+                  <button type="button" onClick={openChallengeForm} className="rounded-full bg-white px-5 py-3 font-black text-slate-900 shadow-lg transition hover:-translate-y-0.5">Edit Challenge</button>
+                  <button type="button" onClick={deleteSelectedChallenge} className="rounded-full border border-white/70 bg-white/10 px-5 py-3 font-black text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-white/20">Delete Challenge</button>
+                </div>
               </div>
               <div className="rounded-3xl bg-white p-5 text-slate-900 shadow-xl">
                 <div className="flex items-center justify-between"><span className="text-sm font-semibold text-slate-500">Current leader</span><Trophy className="h-7 w-7 text-amber-500" /></div>
