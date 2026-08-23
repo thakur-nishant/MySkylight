@@ -728,7 +728,9 @@ function loadChallengeTrackerState(userId, userEmail, challengeIdOverride) {
   const normalizedEmail = (userEmail || '').trim().toLowerCase();
   let challenge;
 
-  if (challengeIdOverride) {
+  const selectedChallengeId = challengeIdOverride || pickBestChallengeId(userId, userEmail);
+
+  if (selectedChallengeId) {
     challenge = db.prepare(`
       SELECT c.id, c.title, c.start_date as startDate, c.end_date as endDate, c.publish_date as publishDate
       FROM challenges c
@@ -740,16 +742,7 @@ function loadChallengeTrackerState(userId, userEmail, challengeIdOverride) {
           )
         )
       LIMIT 1
-    `).get(challengeIdOverride, userId, normalizedEmail);
-  } else {
-    challenge = db.prepare(`
-      SELECT c.id, c.title, c.start_date as startDate, c.end_date as endDate, c.publish_date as publishDate
-      FROM challenges c
-      LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
-      WHERE c.created_by = ? OR LOWER(cp.participant_key) = ?
-      ORDER BY c.id DESC
-      LIMIT 1
-    `).get(userId, normalizedEmail);
+    `).get(selectedChallengeId, userId, normalizedEmail);
   }
 
   if (!challenge) return null;
@@ -803,7 +796,37 @@ function loadChallengeTrackerState(userId, userEmail, challengeIdOverride) {
   return { challengeId: challenge.id, challenge, participants, goals, scores };
 }
 
-function saveChallengeConfig(userId, { challenge, participants, goals, challengeId: explicitChallengeId }) {
+function findAccessibleChallengeIds(userId, userEmail) {
+  const normalizedEmail = (userEmail || '').trim().toLowerCase();
+  return db.prepare(`
+    SELECT DISTINCT c.id
+    FROM challenges c
+    LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
+    WHERE c.created_by = ? OR LOWER(cp.participant_key) = ?
+    ORDER BY c.id DESC
+  `).all(userId, normalizedEmail).map((row) => row.id);
+}
+
+function pickBestChallengeId(userId, userEmail, preferredChallengeId = null) {
+  const ids = findAccessibleChallengeIds(userId, userEmail);
+  if (!ids.length) return null;
+
+  if (preferredChallengeId && ids.includes(Number(preferredChallengeId))) {
+    return Number(preferredChallengeId);
+  }
+
+  const candidates = ids.map((id) => {
+    const entryCount = db.prepare('SELECT COUNT(*) as count FROM challenge_daily_entries WHERE challenge_id = ?').get(id)?.count || 0;
+    const goalCount = db.prepare('SELECT COUNT(*) as count FROM challenge_goals WHERE challenge_id = ?').get(id)?.count || 0;
+    const participantCount = db.prepare('SELECT COUNT(*) as count FROM challenge_participants WHERE challenge_id = ?').get(id)?.count || 0;
+    return { id, score: entryCount + goalCount + participantCount };
+  });
+
+  candidates.sort((a, b) => b.score - a.score || b.id - a.id);
+  return candidates[0]?.id ?? null;
+}
+
+function saveChallengeConfig(userId, userEmail, { challenge, participants, goals, challengeId: explicitChallengeId }) {
   const normalizedParticipants = (participants || []).map((participant, index) => {
     const rawId = participant?.id || participant?.email || `participant-${index + 1}`;
     const participantId = String(rawId).trim().toLowerCase();
@@ -829,26 +852,19 @@ function saveChallengeConfig(userId, { challenge, participants, goals, challenge
     };
   }
 
-  let challengeId = explicitChallengeId ? Number(explicitChallengeId) : db.prepare(`
-    SELECT id FROM challenges WHERE created_by = ? ORDER BY id DESC LIMIT 1
-  `).get(userId)?.id;
+  let challengeId = explicitChallengeId ? Number(explicitChallengeId) : pickBestChallengeId(userId, userEmail);
 
   if (challengeId) {
-    const ownedChallenge = db.prepare(`
-      SELECT id FROM challenges WHERE id = ? AND created_by = ?
-    `).get(challengeId, userId);
+    const authorizedChallenge = db.prepare(`
+      SELECT c.id
+      FROM challenges c
+      LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
+      WHERE c.id = ? AND (c.created_by = ? OR LOWER(cp.participant_key) = ?)
+      LIMIT 1
+    `).get(challengeId, userId, (userEmail || '').trim().toLowerCase());
 
-    if (!ownedChallenge) {
-      const participantMatch = db.prepare(`
-        SELECT c.id
-        FROM challenges c
-        JOIN challenge_participants cp ON cp.challenge_id = c.id
-        WHERE c.id = ? AND cp.participant_key = ?
-      `).get(challengeId, (userId || '').toString().toLowerCase());
-
-      if (!participantMatch) {
-        challengeId = null;
-      }
+    if (!authorizedChallenge) {
+      challengeId = pickBestChallengeId(userId, userEmail, explicitChallengeId);
     }
   }
 
@@ -949,6 +965,33 @@ app.get('/api/challenge-tracker/list', authMiddleware, (req, res) => {
   res.json(challenges);
 });
 
+app.delete('/api/challenge-tracker/:id', authMiddleware, (req, res) => {
+  const challengeId = Number(req.params.id);
+  if (!Number.isFinite(challengeId)) {
+    return res.status(400).json({ error: 'Invalid challenge id' });
+  }
+
+  const challenge = db.prepare('SELECT id, created_by FROM challenges WHERE id = ?').get(challengeId);
+  if (!challenge) {
+    return res.status(404).json({ error: 'Challenge not found' });
+  }
+
+  const normalizedEmail = (req.user.email || '').trim().toLowerCase();
+  const isCreator = challenge.created_by === req.user.id;
+  const isParticipant = !!db.prepare(`
+    SELECT 1 FROM challenge_participants
+    WHERE challenge_id = ? AND LOWER(participant_key) = ?
+    LIMIT 1
+  `).get(challengeId, normalizedEmail);
+
+  if (!isCreator && !isParticipant) {
+    return res.status(403).json({ error: 'You do not have access to delete this challenge' });
+  }
+
+  db.prepare('DELETE FROM challenges WHERE id = ?').run(challengeId);
+  res.status(204).send();
+});
+
 app.get('/api/challenge-tracker/:id', authMiddleware, (req, res) => {
   const state = loadChallengeTrackerState(req.user.id, req.user.email, Number(req.params.id));
   if (!state) return res.status(404).json({ error: 'Challenge not found' });
@@ -961,8 +1004,8 @@ app.put('/api/challenge-tracker', authMiddleware, (req, res) => {
     return res.status(400).json({ error: 'challenge, participants, and goals are required' });
   }
 
-  const challengeId = saveChallengeConfig(req.user.id, { challenge, participants, goals, challengeId: existingChallengeId });
-  const state = loadChallengeTrackerState(req.user.id, req.user.email);
+  const challengeId = saveChallengeConfig(req.user.id, req.user.email, { challenge, participants, goals, challengeId: existingChallengeId });
+  const state = loadChallengeTrackerState(req.user.id, req.user.email, challengeId);
   res.json({ ...state, challengeId });
 });
 
@@ -976,15 +1019,8 @@ app.put('/api/challenge-tracker/entries', authMiddleware, (req, res) => {
   const normalizedEmail = (req.user.email || '').trim().toLowerCase();
   const requestedChallengeId = selectedChallengeId ? Number(selectedChallengeId) : null;
 
-  let challengeId = requestedChallengeId;
-  if (!challengeId) {
-    challengeId = db.prepare(`
-      SELECT c.id FROM challenges c
-      LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
-      WHERE c.created_by = ? OR LOWER(cp.participant_key) = ?
-      ORDER BY c.id DESC LIMIT 1
-    `).get(req.user.id, normalizedEmail)?.id;
-  } else {
+  let challengeId = requestedChallengeId || pickBestChallengeId(req.user.id, req.user.email);
+  if (challengeId) {
     const challengeAccess = db.prepare(`
       SELECT c.id
       FROM challenges c
