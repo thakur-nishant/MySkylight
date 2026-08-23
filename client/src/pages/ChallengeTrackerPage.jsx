@@ -207,22 +207,27 @@ export default function ChallengeTrackerPage() {
         const list = await challengeTracker.list();
         if (cancelled) return;
 
-        setChallengeList({
+        const nextList = {
           active: Array.isArray(list?.active) ? list.active : [],
           past: Array.isArray(list?.past) ? list.past : [],
-        });
+        };
+
+        setChallengeList(nextList);
         setSelectedChallengeId(null);
-        setChallenge(defaultChallenge);
-        setParticipants(defaultParticipants);
-        setDraftParticipants(defaultParticipants);
-        setGoals(defaultGoals);
-        setDraftGoals(defaultGoals);
-        setScores(createInitialScores(
-          buildChallengeDays(defaultChallenge.startDate, defaultChallenge.endDate),
-          defaultParticipants.map((p) => p.id),
-        ));
-        setSelectedDay(defaultChallenge.startDate);
         setShowChallengeForm(false);
+
+        if (!nextList.active.length && !nextList.past.length) {
+          setChallenge(defaultChallenge);
+          setParticipants(defaultParticipants);
+          setDraftParticipants(defaultParticipants);
+          setGoals(defaultGoals);
+          setDraftGoals(defaultGoals);
+          setScores(createInitialScores(
+            buildChallengeDays(defaultChallenge.startDate, defaultChallenge.endDate),
+            defaultParticipants.map((p) => p.id),
+          ));
+          setSelectedDay(defaultChallenge.startDate);
+        }
       } catch (error) {
         console.error('Failed to load challenge tracker', error);
       }
@@ -280,6 +285,7 @@ export default function ChallengeTrackerPage() {
       };
 
       challengeTracker.saveEntry({
+        challengeId: challengeId || selectedChallengeId,
         date: selectedDay,
         participantId,
         entry: participantEntry,
