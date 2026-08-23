@@ -25,9 +25,9 @@ export default function Layout() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
+    <div className="h-screen bg-slate-50 flex overflow-hidden">
       <aside
-        className={`bg-white border-r border-slate-200 flex flex-col transition-all duration-300 ${
+        className={`sticky top-0 h-screen bg-white border-r border-slate-200 flex flex-col transition-all duration-300 ${
           collapsed ? 'w-20' : 'w-64'
         }`}
       >
@@ -68,7 +68,7 @@ export default function Layout() {
         </nav>
 
         {/* User & Logout */}
-        <div className="p-4 border-t border-slate-200">
+        <div className="mt-auto border-t border-slate-200 bg-white p-4">
           <div className={`flex items-center gap-3 ${collapsed ? 'justify-center' : ''}`}>
             <div
               className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-medium"
