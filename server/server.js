@@ -724,16 +724,33 @@ app.patch('/api/completions', authMiddleware, (req, res) => {
 
 
 
-function loadChallengeTrackerState(userId, userEmail) {
+function loadChallengeTrackerState(userId, userEmail, challengeIdOverride) {
   const normalizedEmail = (userEmail || '').trim().toLowerCase();
-  const challenge = db.prepare(`
-    SELECT c.id, c.title, c.start_date as startDate, c.end_date as endDate, c.publish_date as publishDate
-    FROM challenges c
-    LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
-    WHERE c.created_by = ? OR cp.participant_key = ?
-    ORDER BY c.id DESC
-    LIMIT 1
-  `).get(userId, normalizedEmail);
+  let challenge;
+
+  if (challengeIdOverride) {
+    challenge = db.prepare(`
+      SELECT c.id, c.title, c.start_date as startDate, c.end_date as endDate, c.publish_date as publishDate
+      FROM challenges c
+      WHERE c.id = ?
+        AND (
+          c.created_by = ? OR EXISTS (
+            SELECT 1 FROM challenge_participants cp
+            WHERE cp.challenge_id = c.id AND LOWER(cp.participant_key) = ?
+          )
+        )
+      LIMIT 1
+    `).get(challengeIdOverride, userId, normalizedEmail);
+  } else {
+    challenge = db.prepare(`
+      SELECT c.id, c.title, c.start_date as startDate, c.end_date as endDate, c.publish_date as publishDate
+      FROM challenges c
+      LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
+      WHERE c.created_by = ? OR LOWER(cp.participant_key) = ?
+      ORDER BY c.id DESC
+      LIMIT 1
+    `).get(userId, normalizedEmail);
+  }
 
   if (!challenge) return null;
 
@@ -879,9 +896,62 @@ function saveChallengeConfig(userId, { challenge, participants, goals, challenge
   return challengeId;
 }
 
+function listChallengeTrackerChallenges(userId, userEmail) {
+  const normalizedEmail = (userEmail || '').trim().toLowerCase();
+  const challenges = db.prepare(`
+    SELECT DISTINCT c.id, c.title, c.start_date as startDate, c.end_date as endDate, c.publish_date as publishDate
+    FROM challenges c
+    LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
+    WHERE c.created_by = ? OR LOWER(cp.participant_key) = ?
+    ORDER BY c.start_date DESC, c.id DESC
+  `).all(userId, normalizedEmail);
+
+  const normalized = challenges.map((challenge) => {
+    const participants = db.prepare(`
+      SELECT participant_key as id, participant_key as email, name, color, text_class as text
+      FROM challenge_participants
+      WHERE challenge_id = ?
+      ORDER BY display_order, participant_key
+    `).all(challenge.id);
+
+    return {
+      ...challenge,
+      participants,
+      sharedWith: participants.map((participant) => participant.email || participant.name),
+    };
+  });
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return {
+    active: normalized.filter((challenge) => {
+      if (!challenge.endDate) return true;
+      const endDate = new Date(`${challenge.endDate}T00:00:00`);
+      return endDate >= today;
+    }),
+    past: normalized.filter((challenge) => {
+      if (!challenge.endDate) return false;
+      const endDate = new Date(`${challenge.endDate}T00:00:00`);
+      return endDate < today;
+    }),
+  };
+}
+
 app.get('/api/challenge-tracker', authMiddleware, (req, res) => {
   const state = loadChallengeTrackerState(req.user.id, req.user.email);
   if (!state) return res.status(404).json({ error: 'No saved challenge' });
+  res.json(state);
+});
+
+app.get('/api/challenge-tracker/list', authMiddleware, (req, res) => {
+  const challenges = listChallengeTrackerChallenges(req.user.id, req.user.email);
+  res.json(challenges);
+});
+
+app.get('/api/challenge-tracker/:id', authMiddleware, (req, res) => {
+  const state = loadChallengeTrackerState(req.user.id, req.user.email, Number(req.params.id));
+  if (!state) return res.status(404).json({ error: 'Challenge not found' });
   res.json(state);
 });
 

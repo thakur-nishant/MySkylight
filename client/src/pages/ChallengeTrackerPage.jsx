@@ -154,6 +154,8 @@ function ProgressBar({ value, max = maxDailyPoints, gradient = 'from-emerald-400
 export default function ChallengeTrackerPage() {
   const [challenge, setChallenge] = useState(defaultChallenge);
   const [challengeId, setChallengeId] = useState(null);
+  const [challengeList, setChallengeList] = useState({ active: [], past: [] });
+  const [selectedChallengeId, setSelectedChallengeId] = useState(null);
   const [draftChallenge, setDraftChallenge] = useState(defaultChallenge);
   const [participants, setParticipants] = useState(defaultParticipants);
   const [draftParticipants, setDraftParticipants] = useState(defaultParticipants);
@@ -167,40 +169,62 @@ export default function ChallengeTrackerPage() {
     defaultParticipants.map((p) => p.id),
   ));
 
+  const applyChallengeState = (state) => {
+    if (!state || !state.challenge) return;
+
+    const participantIds = state.participants.map((participant) => participant.id);
+    const challengeDays = buildChallengeDays(state.challenge.startDate, state.challenge.endDate);
+
+    setChallenge(state.challenge);
+    setChallengeId(state.challengeId ?? state.challenge.id ?? null);
+    setDraftChallenge(state.challenge);
+    setParticipants(state.participants);
+    setDraftParticipants(state.participants);
+    setGoals(state.goals);
+    setDraftGoals(state.goals);
+    setScores(mergeScoresForDays(state.scores, challengeDays, participantIds));
+    setSelectedDay(state.challenge.startDate);
+  };
+
+  const refreshChallengeList = async () => {
+    try {
+      const list = await challengeTracker.list();
+      setChallengeList({
+        active: Array.isArray(list?.active) ? list.active : [],
+        past: Array.isArray(list?.past) ? list.past : [],
+      });
+    } catch (error) {
+      console.error('Failed to load challenge list', error);
+      setChallengeList({ active: [], past: [] });
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        const state = await challengeTracker.load();
-        if (cancelled || !state) return;
+        const list = await challengeTracker.list();
+        if (cancelled) return;
 
-        const participantIds = state.participants.map((participant) => participant.id);
-        const challengeDays = buildChallengeDays(state.challenge.startDate, state.challenge.endDate);
-
-        setChallenge(state.challenge);
-        setChallengeId(state.challengeId ?? null);
-        setDraftChallenge(state.challenge);
-        setParticipants(state.participants);
-        setDraftParticipants(state.participants);
-        setGoals(state.goals);
-        setDraftGoals(state.goals);
-        setScores(mergeScoresForDays(state.scores, challengeDays, participantIds));
-        setSelectedDay(state.challenge.startDate);
+        setChallengeList({
+          active: Array.isArray(list?.active) ? list.active : [],
+          past: Array.isArray(list?.past) ? list.past : [],
+        });
+        setSelectedChallengeId(null);
+        setChallenge(defaultChallenge);
+        setParticipants(defaultParticipants);
+        setDraftParticipants(defaultParticipants);
+        setGoals(defaultGoals);
+        setDraftGoals(defaultGoals);
+        setScores(createInitialScores(
+          buildChallengeDays(defaultChallenge.startDate, defaultChallenge.endDate),
+          defaultParticipants.map((p) => p.id),
+        ));
+        setSelectedDay(defaultChallenge.startDate);
+        setShowChallengeForm(false);
       } catch (error) {
-        if (error.message === 'No saved challenge') {
-          try {
-            await challengeTracker.saveConfig({
-              challenge: defaultChallenge,
-              participants: defaultParticipants,
-              goals: defaultGoals,
-            });
-          } catch (seedError) {
-            console.error('Failed to initialize challenge tracker', seedError);
-          }
-        } else {
-          console.error('Failed to load challenge tracker', error);
-        }
+        console.error('Failed to load challenge tracker', error);
       }
     })();
 
@@ -319,7 +343,11 @@ export default function ChallengeTrackerPage() {
         participants: draftParticipants,
         goals: draftGoals,
       });
-      if (saved?.challengeId) setChallengeId(saved.challengeId);
+      if (saved?.challengeId) {
+        setChallengeId(saved.challengeId);
+        setSelectedChallengeId(saved.challengeId);
+      }
+      await refreshChallengeList();
     } catch (error) {
       console.error('Failed to save challenge', error);
       return;
@@ -340,12 +368,134 @@ export default function ChallengeTrackerPage() {
     setShowChallengeForm(true);
   };
 
+  const startNewChallenge = () => {
+    setSelectedChallengeId(null);
+    setChallengeId(null);
+    setChallenge(defaultChallenge);
+    setParticipants(defaultParticipants);
+    setDraftChallenge(defaultChallenge);
+    setDraftParticipants(defaultParticipants);
+    setGoals(defaultGoals);
+    setDraftGoals(defaultGoals);
+    setSelectedDay(defaultChallenge.startDate);
+    setScores(createInitialScores(
+      buildChallengeDays(defaultChallenge.startDate, defaultChallenge.endDate),
+      defaultParticipants.map((p) => p.id),
+    ));
+    setShowChallengeForm(true);
+  };
+
+  const openChallenge = async (challengeMeta) => {
+    try {
+      const state = await challengeTracker.loadById(challengeMeta.id);
+      applyChallengeState(state);
+      setSelectedChallengeId(challengeMeta.id);
+      setChallengeId(challengeMeta.id);
+      setShowChallengeForm(false);
+    } catch (error) {
+      console.error('Failed to load challenge', error);
+    }
+  };
+
   const leader = leaderboard[0];
   const runnerUp = leaderboard[1];
   const sharedWith = participants
     .map((participant) => participant.email || participant.name)
     .filter(Boolean)
     .filter((value, index, arr) => arr.indexOf(value) === index);
+
+  if (!selectedChallengeId && !showChallengeForm) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-900">
+        <div className="bg-[radial-gradient(circle_at_top_left,#38bdf8_0,transparent_35%),radial-gradient(circle_at_top_right,#f472b6_0,transparent_30%),linear-gradient(180deg,#0f172a_0%,#f8fafc_42%)] px-4 py-6 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-7xl space-y-6">
+            <section className="overflow-hidden rounded-[2rem] border border-white/20 bg-white/10 p-6 text-white shadow-2xl backdrop-blur md:p-8">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm font-semibold text-cyan-100">
+                    <Trophy className="h-4 w-4" /> Challenge tracker
+                  </div>
+                  <h1 className="font-display text-3xl font-black leading-tight md:text-5xl">Choose an active challenge</h1>
+                </div>
+                <button type="button" onClick={startNewChallenge} className="rounded-full bg-white px-5 py-3 font-black text-slate-900 shadow-lg transition hover:-translate-y-0.5">Create new challenge</button>
+              </div>
+            </section>
+
+            <section className="space-y-6">
+              <div>
+                <div className="mb-3 flex items-center justify-between">
+                  <h2 className="text-2xl font-black text-white">Ongoing challenges</h2>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {challengeList.active.length === 0 ? (
+                    <div className="rounded-3xl bg-white p-8 text-center shadow-lg md:col-span-2 xl:col-span-3">
+                      <p className="mb-3 text-xl font-black text-slate-900">No ongoing challenges</p>
+                      <p className="mb-6 text-slate-500">Create your first challenge and invite teammates by email to share progress.</p>
+                      <button type="button" onClick={startNewChallenge} className="rounded-2xl bg-slate-900 px-5 py-3 font-black text-white">Create challenge</button>
+                    </div>
+                  ) : (
+                    challengeList.active.map((challengeItem) => (
+                      <button
+                        key={challengeItem.id}
+                        type="button"
+                        onClick={() => openChallenge(challengeItem)}
+                        className="group rounded-3xl border border-slate-200 bg-white p-5 text-left shadow-lg transition hover:-translate-y-1 hover:shadow-xl"
+                      >
+                        <div className="mb-3 flex items-center justify-between">
+                          <span className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1 text-xs font-bold text-sky-700">
+                            <Trophy className="h-3.5 w-3.5" /> Active
+                          </span>
+                          <span className="text-xs font-semibold text-slate-500">{formatDate(parseLocalDate(challengeItem.startDate))} – {formatDate(parseLocalDate(challengeItem.endDate))}</span>
+                        </div>
+                        <h2 className="text-2xl font-black text-slate-900">{challengeItem.title}</h2>
+                        <p className="mt-3 text-sm text-slate-500">Results publish {formatDate(parseLocalDate(challengeItem.publishDate))}</p>
+                        <div className="mt-4 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600">
+                          <span className="font-semibold text-slate-700">Shared with:</span> {challengeItem.sharedWith?.length ? challengeItem.sharedWith.join(', ') : 'Only you'}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-3 flex items-center justify-between">
+                  <h2 className="text-2xl font-black text-white">Past challenges</h2>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {challengeList.past.length === 0 ? (
+                    <div className="rounded-3xl bg-white/80 p-5 text-sm text-slate-600 shadow-md md:col-span-2 xl:col-span-3">
+                      No past challenges yet.
+                    </div>
+                  ) : (
+                    challengeList.past.map((challengeItem) => (
+                      <button
+                        key={challengeItem.id}
+                        type="button"
+                        onClick={() => openChallenge(challengeItem)}
+                        className="group rounded-3xl border border-slate-200 bg-white p-5 text-left shadow-lg transition hover:-translate-y-1 hover:shadow-xl"
+                      >
+                        <div className="mb-3 flex items-center justify-between">
+                          <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
+                            <CalendarDays className="h-3.5 w-3.5" /> Past
+                          </span>
+                          <span className="text-xs font-semibold text-slate-500">{formatDate(parseLocalDate(challengeItem.startDate))} – {formatDate(parseLocalDate(challengeItem.endDate))}</span>
+                        </div>
+                        <h2 className="text-2xl font-black text-slate-900">{challengeItem.title}</h2>
+                        <div className="mt-4 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600">
+                          <span className="font-semibold text-slate-700">Shared with:</span> {challengeItem.sharedWith?.length ? challengeItem.sharedWith.join(', ') : 'Only you'}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-900">
