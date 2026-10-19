@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Calendar, ListTodo, BarChart3, LogOut, ChevronsLeft, ChevronsRight, ClipboardCheck, KanbanSquare, Trophy } from 'lucide-react';
+import ThemeToggle from './ThemeToggle';
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -68,7 +69,8 @@ export default function Layout() {
         </nav>
 
         {/* User & Logout */}
-        <div className="mt-auto border-t border-slate-200 bg-white p-4">
+        <div className="mt-auto space-y-3 border-t border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <ThemeToggle compact={collapsed} />
           <div className={`flex items-center gap-3 ${collapsed ? 'justify-center' : ''}`}>
             <div
               className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-medium"
@@ -78,7 +80,7 @@ export default function Layout() {
             </div>
             {!collapsed && (
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-slate-800 truncate">{user?.name}</p>
+                <p className="font-medium text-slate-800 truncate dark:text-slate-100">{user?.name}</p>
                 <p className="text-xs text-slate-500 truncate">{user?.email}</p>
               </div>
             )}
@@ -87,7 +89,7 @@ export default function Layout() {
           {!collapsed && (
             <button
               onClick={handleLogout}
-              className="mt-3 w-full flex items-center gap-3 px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              className="mt-3 w-full flex items-center gap-3 px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <LogOut className="w-4 h-4" />
               Sign out
