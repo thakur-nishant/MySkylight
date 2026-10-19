@@ -145,6 +145,13 @@ export const calendar = {
   },
 };
 
+export const integrations = {
+  google: {
+    connectUrl: () => api('/integrations/google/connect'),
+    importRange: (start, end) => api(`/integrations/google/import?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`, { method: 'POST' }),
+  },
+};
+
 export const tracker = {
   weekly: (params) => api('/tracker/weekly' + (params ? '?' + new URLSearchParams(params).toString() : '')),
 
