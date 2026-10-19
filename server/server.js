@@ -408,7 +408,7 @@ app.delete('/api/completions/:id', authMiddleware, (req, res) => {
   res.status(204).send();
 });
 
-// Ensure table for storing Google OAuth tokens exists
+// Ensure tables for storing Google OAuth tokens and imported events exist
 try {
   db.prepare(`CREATE TABLE IF NOT EXISTS google_tokens (
     user_id INTEGER PRIMARY KEY,
@@ -416,8 +416,13 @@ try {
     refresh_token TEXT,
     expires_at INTEGER
   )`).run();
+  db.prepare(`CREATE TABLE IF NOT EXISTS google_imports (
+    gcal_id TEXT PRIMARY KEY,
+    task_id INTEGER,
+    imported_at INTEGER
+  )`).run();
 } catch (err) {
-  console.error('Failed to ensure google_tokens table', err);
+  console.error('Failed to ensure google integration tables', err);
 }
 
 // Route to create Google OAuth connect URL
@@ -468,6 +473,104 @@ app.get('/api/integrations/google/callback', authMiddleware, async (req, res) =>
   } catch (err) {
     console.error('google callback error', err);
     return res.status(500).send('Google callback failed');
+  }
+});
+
+// Import Google Calendar events into local tasks (one-way import)
+app.post('/api/integrations/google/import', authMiddleware, async (req, res) => {
+  const { start, end, calendarId = 'primary' } = req.query;
+  const rangeStart = start?.slice(0, 10) || formatYmd(new Date());
+  const rangeEnd = end?.slice(0, 10) || formatYmd(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
+
+  const tokenRow = db.prepare('SELECT * FROM google_tokens WHERE user_id = ?').get(req.user.id);
+  if (!tokenRow || !tokenRow.access_token) return res.status(400).json({ error: 'Google not connected' });
+
+  let accessToken = tokenRow.access_token;
+  // refresh if expired
+  if (tokenRow.expires_at && Number(tokenRow.expires_at) <= Date.now()) {
+    try {
+      const refreshRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: process.env.GOOGLE_CLIENT_ID,
+          client_secret: process.env.GOOGLE_CLIENT_SECRET,
+          grant_type: 'refresh_token',
+          refresh_token: tokenRow.refresh_token,
+        }),
+      });
+      const refreshJson = await refreshRes.json();
+      if (refreshJson.access_token) {
+        accessToken = refreshJson.access_token;
+        db.prepare('UPDATE google_tokens SET access_token = ?, refresh_token = COALESCE(?, refresh_token), expires_at = ? WHERE user_id = ?')
+          .run(accessToken, refreshJson.refresh_token || tokenRow.refresh_token, refreshJson.expires_in ? Date.now() + refreshJson.expires_in * 1000 : null, req.user.id);
+      }
+    } catch (err) {
+      console.error('Failed to refresh Google access token', err);
+    }
+  }
+
+  try {
+    const timeMin = `${rangeStart}T00:00:00Z`;
+    const timeMax = `${rangeEnd}T23:59:59Z`;
+    const gres = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=true`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const gjson = await gres.json();
+    if (!Array.isArray(gjson.items)) return res.json({ imported: [] });
+
+    const created = [];
+    const insertTask = db.prepare(`
+      INSERT INTO tasks (title, description, task_type, recurrence_pattern, default_stars, is_group_task, group_id, due_date, start_time, end_time, is_all_day, is_personal, created_by, project_id, workflow_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const insertMap = db.prepare('INSERT OR REPLACE INTO google_imports (gcal_id, task_id, imported_at) VALUES (?, ?, ?)');
+
+    for (const it of gjson.items) {
+      if (it.status === 'cancelled') continue;
+      const gId = it.id;
+      const existing = db.prepare('SELECT task_id FROM google_imports WHERE gcal_id = ?').get(gId);
+      if (existing) continue; // already imported
+
+      const startVal = it.start?.dateTime || it.start?.date; // date or dateTime
+      const endVal = it.end?.dateTime || it.end?.date;
+      const startDate = new Date(startVal);
+      const dueDate = formatYmd(startDate);
+      let startTime = null;
+      let endTime = null;
+      const allDay = !!it.start?.date;
+      if (!allDay && it.start?.dateTime) startTime = new Date(it.start.dateTime).toISOString().slice(11,16);
+      if (!allDay && it.end?.dateTime) endTime = new Date(it.end.dateTime).toISOString().slice(11,16);
+
+      const result = insertTask.run(
+        it.summary || '(no title)',
+        it.description || null,
+        'event',
+        null,
+        1,
+        0,
+        null,
+        dueDate,
+        startTime,
+        endTime,
+        allDay ? 1 : 0,
+        0,
+        req.user.id,
+        null,
+        'backlog'
+      );
+
+      const taskId = result.lastInsertRowid;
+      insertMap.run(gId, taskId, Date.now());
+      const task = db.prepare('SELECT id, title, due_date, start_time, end_time, is_all_day FROM tasks WHERE id = ?').get(taskId);
+      created.push(task);
+    }
+
+    res.json({ imported: created });
+  } catch (err) {
+    console.error('Failed to import Google events', err);
+    return res.status(500).json({ error: 'import_failed' });
   }
 });
 
