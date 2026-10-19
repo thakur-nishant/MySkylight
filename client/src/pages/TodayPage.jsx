@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { calendar, tracker } from '../api';
+import { calendar, completions } from '../api';
 import { format } from 'date-fns';
 import { formatDatePST, todayPST } from '../utils/dateUtils';
+import { useAuth } from '../context/AuthContext';
 
 function prettyDate(date) {
   return format(date, 'EEEE, MMMM d');
@@ -21,6 +22,7 @@ function prettyTime(iso) {
 }
 
 export default function TodayPage() {
+  const { user } = useAuth();
   const [events, setEvents] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -34,11 +36,33 @@ export default function TodayPage() {
     async function load() {
       try {
         const ev = await calendar.events({ start: todayStr, end: todayStr });
-        const week = await tracker.weekly({ week_start: todayStr });
-        const todays = (week.tasks || []).filter((t) => t.due_date === todayStr);
+        // fetch today's completions for current user to determine completed state
+        const comps = await completions.list({ start_date: todayStr, end_date: todayStr, user_id: user?.id });
+        const completedMap = new Map();
+        (comps || []).forEach((c) => {
+          // server returns task_id on completion entries
+          if (c.task_id != null) completedMap.set(String(c.task_id), c.id);
+        });
+
+        const taskEvents = (ev || []).filter((e) => e.resource?.type === 'task').map((e) => {
+          const taskId = String(e.resource.taskId || '').replace(/^task-/, '');
+          const tid = e.resource?.taskId ?? (e.id ? ('' + e.id).replace(/^task-/, '') : null);
+          const key = String(tid);
+          return {
+            id: key,
+            title: e.title,
+            project_name: e.resource?.projectName,
+            start: e.start,
+            end: e.end,
+            allDay: !!e.allDay,
+            completed: completedMap.has(key),
+            completionId: completedMap.get(key) || null,
+          };
+        });
+
         if (!mounted) return;
         setEvents(ev || []);
-        setTasks(todays || []);
+        setTasks(taskEvents);
       } catch (err) {
         console.error('Failed to load today data', err);
       } finally {
@@ -46,21 +70,33 @@ export default function TodayPage() {
       }
     }
 
-    load();
+    if (user) load();
     return () => { mounted = false; };
-  }, [todayStr]);
+  }, [todayStr, user]);
 
   const firstEvent = events[0];
 
   async function toggleTask(task) {
-    // optimistic toggle
     const original = tasks;
     const wasCompleted = !!task.completed;
-    const updated = tasks.map(t => t.id === task.id ? { ...t, completed: !wasCompleted } : t);
+    const updated = tasks.map((t) => (t.id === task.id ? { ...t, completed: !wasCompleted } : t));
     setTasks(updated);
 
     try {
-      await tracker.toggleTask(task.id, { completed: !wasCompleted, date: todayStr });
+      if (wasCompleted) {
+        // delete the completion
+        if (task.completionId) {
+          await completions.delete(task.completionId);
+          setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, completed: false, completionId: null } : t));
+        }
+      } else {
+        // create completion (server defaults user to current user if not supplied)
+        const res = await completions.create({ task_id: Number(task.id) });
+        // server returns array of inserted completions
+        const newComp = Array.isArray(res) ? res[0] : res;
+        const compId = newComp?.id ?? null;
+        setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, completed: true, completionId: compId } : t));
+      }
     } catch (err) {
       console.error('toggle failed', err);
       setTasks(original);
