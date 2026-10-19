@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { calendar, completions } from '../api';
+import { calendar, completions, users as usersApi } from '../api';
 import { format } from 'date-fns';
 import { formatDatePST, todayPST } from '../utils/dateUtils';
 import { useAuth } from '../context/AuthContext';
+import { useQuery } from '../hooks/useQuery';
+import CompleteTaskModal from '../components/CompleteTaskModal';
 
 function prettyDate(date) {
   return format(date, 'EEEE, MMMM d');
@@ -26,76 +28,88 @@ export default function TodayPage() {
   const [events, setEvents] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [selectedCompletions, setSelectedCompletions] = useState([]);
+
   const todayDate = todayPST();
   const todayStr = formatDatePST(todayDate); // yyyy-MM-dd
 
-  useEffect(() => {
-    let mounted = true;
+  const { data: users } = useQuery(['users-for-today'], () => usersApi.list(), { enabled: true });
+
+  async function load() {
     setLoading(true);
+    try {
+      const ev = await calendar.events({ start: todayStr, end: todayStr });
+      // fetch today's completions for current user to determine completed state
+      const comps = await completions.list({ start_date: todayStr, end_date: todayStr, user_id: user?.id });
+      const completedMap = new Map();
+      (comps || []).forEach((c) => {
+        if (c.task_id != null) completedMap.set(String(c.task_id), c.id);
+      });
 
-    async function load() {
-      try {
-        const ev = await calendar.events({ start: todayStr, end: todayStr });
-        // fetch today's completions for current user to determine completed state
-        const comps = await completions.list({ start_date: todayStr, end_date: todayStr, user_id: user?.id });
-        const completedMap = new Map();
-        (comps || []).forEach((c) => {
-          // server returns task_id on completion entries
-          if (c.task_id != null) completedMap.set(String(c.task_id), c.id);
-        });
+      const taskEvents = (ev || []).filter((e) => e.resource?.type === 'task').map((e) => {
+        const tid = e.resource?.taskId ?? (e.id ? ('' + e.id).replace(/^task-/, '') : null);
+        const key = String(tid);
+        return {
+          id: key,
+          title: e.title,
+          project_name: e.resource?.projectName,
+          start: e.start,
+          end: e.end,
+          allDay: !!e.allDay,
+          completed: completedMap.has(key),
+          completionId: completedMap.get(key) || null,
+        };
+      });
 
-        const taskEvents = (ev || []).filter((e) => e.resource?.type === 'task').map((e) => {
-          const taskId = String(e.resource.taskId || '').replace(/^task-/, '');
-          const tid = e.resource?.taskId ?? (e.id ? ('' + e.id).replace(/^task-/, '') : null);
-          const key = String(tid);
-          return {
-            id: key,
-            title: e.title,
-            project_name: e.resource?.projectName,
-            start: e.start,
-            end: e.end,
-            allDay: !!e.allDay,
-            completed: completedMap.has(key),
-            completionId: completedMap.get(key) || null,
-          };
-        });
-
-        if (!mounted) return;
-        setEvents(ev || []);
-        setTasks(taskEvents);
-      } catch (err) {
-        console.error('Failed to load today data', err);
-      } finally {
-        if (mounted) setLoading(false);
-      }
+      setEvents(ev || []);
+      setTasks(taskEvents);
+    } catch (err) {
+      console.error('Failed to load today data', err);
+    } finally {
+      setLoading(false);
     }
+  }
 
+  useEffect(() => {
     if (user) load();
-    return () => { mounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [todayStr, user]);
 
   const firstEvent = events[0];
 
-  async function toggleTask(task) {
+  async function openTaskModal(task) {
+    setSelectedTask(task);
+    try {
+      const comps = await completions.list({ task_id: task.id, start_date: todayStr, end_date: todayStr });
+      setSelectedCompletions(Array.isArray(comps) ? comps : []);
+    } catch (err) {
+      console.error('failed to load completions for task', err);
+      setSelectedCompletions([]);
+    }
+  }
+
+  const closeModal = () => {
+    setSelectedTask(null);
+    setSelectedCompletions([]);
+    void load();
+  };
+
+  async function toggleInline(task) {
     const original = tasks;
     const wasCompleted = !!task.completed;
-    const updated = tasks.map((t) => (t.id === task.id ? { ...t, completed: !wasCompleted } : t));
-    setTasks(updated);
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: !wasCompleted } : t)));
 
     try {
       if (wasCompleted) {
-        // delete the completion
         if (task.completionId) {
           await completions.delete(task.completionId);
-          setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, completed: false, completionId: null } : t));
         }
       } else {
-        // create completion (server defaults user to current user if not supplied)
         const res = await completions.create({ task_id: Number(task.id) });
-        // server returns array of inserted completions
         const newComp = Array.isArray(res) ? res[0] : res;
         const compId = newComp?.id ?? null;
-        setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, completed: true, completionId: compId } : t));
+        setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: true, completionId: compId } : t)));
       }
     } catch (err) {
       console.error('toggle failed', err);
@@ -140,12 +154,12 @@ export default function TodayPage() {
             <ul className="space-y-2">
               {tasks.map((task) => (
                 <li key={task.id} className="flex items-center justify-between p-2 rounded hover:bg-slate-50 dark:hover:bg-slate-800">
-                  <div>
+                  <button onClick={() => openTaskModal(task)} className="flex-1 text-left">
                     <div className="font-medium text-slate-800 dark:text-slate-100">{task.title}</div>
                     <div className="text-xs text-slate-500">{task.project_name || ''}</div>
-                  </div>
+                  </button>
                   <div>
-                    <button onClick={() => toggleTask(task)} className={`px-3 py-1 rounded ${task.completed ? 'bg-emerald-500 text-white' : 'border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'}`}>
+                    <button onClick={() => toggleInline(task)} className={`px-3 py-1 rounded ${task.completed ? 'bg-emerald-500 text-white' : 'border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'}`}>
                       {task.completed ? 'Done' : 'Mark done'}
                     </button>
                   </div>
@@ -157,6 +171,19 @@ export default function TodayPage() {
           )}
         </section>
       </div>
+
+      {selectedTask && (
+        <CompleteTaskModal
+          task={selectedTask}
+          existingCompletions={selectedCompletions}
+          users={Array.isArray(users) ? users : []}
+          currentUser={user}
+          onClose={closeModal}
+          onComplete={() => {
+            void load();
+          }}
+        />
+      )}
     </div>
   );
 }
