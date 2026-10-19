@@ -72,7 +72,8 @@ export default function TodayPage() {
   }
 
   useEffect(() => {
-    if (user) load();
+    // Load regardless of whether user object is ready — completions list will filter by user when available.
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [todayStr, user]);
 
