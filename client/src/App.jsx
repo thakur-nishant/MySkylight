@@ -10,6 +10,7 @@ import InsightsPage from './pages/InsightsPage';
 import PersonalTrackerPage from './pages/PersonalTrackerPage';
 import ProjectDashboardPage from './pages/ProjectDashboardPage';
 import ChallengeTrackerPage from './pages/ChallengeTrackerPage';
+import TodayPage from './pages/TodayPage';
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -41,6 +42,7 @@ function AppRoutes() {
         }
       >
         <Route index element={<Navigate to="/calendar" replace />} />
+        <Route path="today" element={<TodayPage />} />
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="tasks" element={<TasksPage />} />
         <Route path="projects" element={<ProjectDashboardPage />} />

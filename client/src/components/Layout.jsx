@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Calendar, ListTodo, BarChart3, LogOut, ChevronsLeft, ChevronsRight, ClipboardCheck, KanbanSquare, Trophy } from 'lucide-react';
+import { Calendar, ListTodo, BarChart3, LogOut, ChevronsLeft, ChevronsRight, ClipboardCheck, KanbanSquare, Trophy, Sun } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 
 export default function Layout() {
@@ -17,6 +17,7 @@ export default function Layout() {
   const toggleSidebar = () => setCollapsed(!collapsed);
 
   const navItems = [
+    { to: '/today', icon: Sun, label: 'Today' },
     { to: '/calendar', icon: Calendar, label: 'Calendar' },
     { to: '/tasks', icon: ListTodo, label: 'Tasks' },
     { to: '/projects', icon: KanbanSquare, label: 'Project Dashboard' },
