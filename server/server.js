@@ -9,6 +9,8 @@ const PORT = process.env.PORT || 3001;
 app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
 app.use(express.json());
 
+const GOOGLE_ENABLED = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.SERVER_ORIGIN);
+
 const WORKFLOW_STATUSES = new Set(['backlog', 'todo', 'in_progress', 'done']);
 const VALID_TASK_TYPES = new Set(['daily', 'weekly', 'monthly', 'one-time', 'event']);
 
@@ -425,11 +427,17 @@ try {
   console.error('Failed to ensure google integration tables', err);
 }
 
+// Route to report whether Google integration is configured
+app.get('/api/integrations/google/status', authMiddleware, (req, res) => {
+  res.json({ enabled: GOOGLE_ENABLED });
+});
+
 // Route to create Google OAuth connect URL
 app.get('/api/integrations/google/connect', authMiddleware, (req, res) => {
-  const redirectUri = `${process.env.SERVER_ORIGIN || 'http://localhost:3001'}/api/integrations/google/callback`;
+  if (!GOOGLE_ENABLED) return res.status(404).json({ error: 'google_not_configured' });
+  const redirectUri = `${process.env.SERVER_ORIGIN}/api/integrations/google/callback`;
   const params = new URLSearchParams({
-    client_id: process.env.GOOGLE_CLIENT_ID || '',
+    client_id: process.env.GOOGLE_CLIENT_ID,
     redirect_uri: redirectUri,
     response_type: 'code',
     scope: 'https://www.googleapis.com/auth/calendar.readonly',
@@ -442,10 +450,11 @@ app.get('/api/integrations/google/connect', authMiddleware, (req, res) => {
 
 // OAuth2 callback to exchange code for tokens and store them
 app.get('/api/integrations/google/callback', authMiddleware, async (req, res) => {
+  if (!GOOGLE_ENABLED) return res.status(404).send('Not configured');
   const code = req.query.code;
   if (!code) return res.status(400).send('Missing code');
 
-  const redirectUri = `${process.env.SERVER_ORIGIN || 'http://localhost:3001'}/api/integrations/google/callback`;
+  const redirectUri = `${process.env.SERVER_ORIGIN}/api/integrations/google/callback`;
 
   try {
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -478,6 +487,7 @@ app.get('/api/integrations/google/callback', authMiddleware, async (req, res) =>
 
 // Import Google Calendar events into local tasks (one-way import)
 app.post('/api/integrations/google/import', authMiddleware, async (req, res) => {
+  if (!GOOGLE_ENABLED) return res.status(404).json({ error: 'google_not_configured' });
   const { start, end, calendarId = 'primary' } = req.query;
   const rangeStart = start?.slice(0, 10) || formatYmd(new Date());
   const rangeEnd = end?.slice(0, 10) || formatYmd(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
