@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { calendar, completions, users as usersApi } from '../api';
+import { calendar, completions, users as usersApi, tasks as tasksApi } from '../api';
 import { format } from 'date-fns';
 import { formatDatePST, todayPST } from '../utils/dateUtils';
 import { useAuth } from '../context/AuthContext';
