@@ -62,8 +62,35 @@ export default function TodayPage() {
         };
       });
 
+      // also include daily tasks from the general task list
+      const allTasks = await tasksApi.list();
+      const dailyTasks = (allTasks || []).filter((t) => t.task_type === 'daily');
+      const dailyConverted = dailyTasks.map((t) => {
+        const id = String(t.id);
+        return {
+          id,
+          title: t.title,
+          project_name: t.project_name || t.project_name || '',
+          start: null,
+          end: null,
+          allDay: true,
+          completed: completedMap.has(id),
+          completionId: completedMap.get(id) || null,
+        };
+      });
+
+      // merge, prefer calendar event entries (preserve order), avoid duplicates
+      const seen = new Set();
+      const merged = [];
+      for (const te of taskEvents) {
+        if (!seen.has(te.id)) { seen.add(te.id); merged.push(te); }
+      }
+      for (const dt of dailyConverted) {
+        if (!seen.has(dt.id)) { seen.add(dt.id); merged.push(dt); }
+      }
+
       setEvents(ev || []);
-      setTasks(taskEvents);
+      setTasks(merged);
     } catch (err) {
       console.error('Failed to load today data', err);
     } finally {
