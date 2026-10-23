@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { calendar, completions, users as usersApi, tasks as tasksApi } from '../api';
 import { format } from 'date-fns';
-import { formatDatePST, todayPST } from '../utils/dateUtils';
+import { formatDatePST, todayPST, zonedTimeToUtc } from '../utils/dateUtils';
 import { useAuth } from '../context/AuthContext';
 import { useQuery } from '../hooks/useQuery';
 import CompleteTaskModal from '../components/CompleteTaskModal';
@@ -33,6 +33,10 @@ export default function TodayPage() {
 
   const todayDate = todayPST();
   const todayStr = formatDatePST(todayDate); // yyyy-MM-dd
+  const completionRange = {
+    start: zonedTimeToUtc(`${todayStr}T00:00:00`)?.toISOString(),
+    end: zonedTimeToUtc(`${todayStr}T23:59:59`)?.toISOString(),
+  };
 
   const { data: users } = useQuery(['users-for-today'], () => usersApi.list(), { enabled: true });
 
@@ -41,7 +45,11 @@ export default function TodayPage() {
     try {
       const ev = await calendar.events({ start: todayStr, end: todayStr });
       // fetch today's completions for current user to determine completed state
-      const comps = await completions.list({ start_date: todayStr, end_date: todayStr, user_id: user?.id });
+      const comps = await completions.list({
+        start_date: completionRange.start,
+        end_date: completionRange.end,
+        user_id: user?.id,
+      });
       const completedMap = new Map();
       (comps || []).forEach((c) => {
         if (c.task_id != null) completedMap.set(String(c.task_id), c.id);
@@ -109,7 +117,11 @@ export default function TodayPage() {
   async function openTaskModal(task) {
     setSelectedTask(task);
     try {
-      const comps = await completions.list({ task_id: task.id, start_date: todayStr, end_date: todayStr });
+      const comps = await completions.list({
+        task_id: task.id,
+        start_date: completionRange.start,
+        end_date: completionRange.end,
+      });
       setSelectedCompletions(Array.isArray(comps) ? comps : []);
     } catch (err) {
       console.error('failed to load completions for task', err);
