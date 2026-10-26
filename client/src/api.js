@@ -31,6 +31,7 @@ export const auth = {
   login: (email, password) => api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   register: (data) => api('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
   me: () => api('/auth/me'),
+  updateProfile: (data) => api('/auth/profile', { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
 export const users = {

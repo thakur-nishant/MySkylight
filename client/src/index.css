@@ -75,6 +75,12 @@ html.dark textarea {
   border-color: rgb(51 65 85);
 }
 
+html.dark input:read-only {
+  background-color: rgb(30 41 59);
+  color: rgb(148 163 184);
+  border-color: rgb(51 65 85);
+}
+
 html.dark .rbc-calendar,
 html.dark .rbc-header,
 html.dark .rbc-toolbar button,

@@ -86,6 +86,7 @@ db.exec(`
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     color TEXT DEFAULT '#6366f1',
+    avatar TEXT,
     household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
     role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('head', 'member')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -233,6 +234,10 @@ const userColumns = db.prepare('PRAGMA table_info(users)').all();
 const hasColorColumn = userColumns.some((column) => column.name === 'color');
 if (!hasColorColumn) {
   db.exec("ALTER TABLE users ADD COLUMN color TEXT DEFAULT '#6366f1'");
+}
+const hasAvatarColumn = userColumns.some((column) => column.name === 'avatar');
+if (!hasAvatarColumn) {
+  db.exec('ALTER TABLE users ADD COLUMN avatar TEXT');
 }
 const hasHouseholdIdColumn = userColumns.some((column) => column.name === 'household_id');
 if (!hasHouseholdIdColumn) {
