@@ -665,7 +665,7 @@ export default function ChallengeTrackerPage() {
                   </div>
                 )}
                 <div className="mt-6 flex flex-wrap gap-3">
-                  <button type="button" onClick={openChallengeForm} className="rounded-full bg-white px-5 py-3 font-black text-slate-900 shadow-lg transition hover:-translate-y-0.5">Edit Challenge</button>
+                  <button type="button" onClick={openChallengeForm} className="rounded-full bg-white px-5 py-3 font-black text-slate-900 shadow-lg transition hover:-translate-y-0.5">Edit challenge &amp; tasks</button>
                   <button type="button" onClick={deleteSelectedChallenge} className="rounded-full border border-white/70 bg-white/10 px-5 py-3 font-black text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-white/20">Delete Challenge</button>
                 </div>
               </div>
@@ -682,26 +682,26 @@ export default function ChallengeTrackerPage() {
           {showChallengeForm && (
           <section className="rounded-3xl bg-white p-5 shadow-lg">
             <h2 className="mb-2 text-xl font-black">{challengeId ? 'Edit challenge' : 'Create challenge'}</h2>
-            <p className="mb-4 text-sm text-slate-500">Customize the fields everyone tracks, set participant targets, and choose which fields count toward the score. Saving keeps your logged daily entries.</p>
+            <p className="mb-4 text-sm text-slate-500">Add the tasks everyone will track, set the points each task earns, and set participant goals. These settings apply only to this challenge. Saving keeps your logged daily entries.</p>
             <div className="mb-4 grid gap-3 md:grid-cols-3"><label className="block rounded-2xl bg-slate-50 p-3"><span className="mb-2 block text-sm font-bold text-slate-600">Challenge title</span><input value={draftChallenge.title} onChange={(event) => setDraftChallenge((current) => ({ ...current, title: event.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 font-semibold" /></label><label className="block rounded-2xl bg-slate-50 p-3"><span className="mb-2 block text-sm font-bold text-slate-600">Start date</span><input type="date" value={draftChallenge.startDate} onChange={(event) => setDraftChallenge((current) => ({ ...current, startDate: event.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 font-semibold" /></label><label className="block rounded-2xl bg-slate-50 p-3"><span className="mb-2 block text-sm font-bold text-slate-600">End date</span><input type="date" value={draftChallenge.endDate} onChange={(event) => setDraftChallenge((current) => ({ ...current, endDate: event.target.value, publishDate: getPublishDateString(event.target.value) }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 font-semibold" /></label></div>
             <div className="mb-5 rounded-3xl border border-slate-100 p-4">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-lg font-black">Daily tracking fields</h3>
-                  <p className="text-sm text-slate-500">Rename, add, or remove fields. Number fields can be scored against a goal or kept for reference.</p>
+                  <h3 className="text-lg font-black">1. Challenge tasks and points</h3>
+                  <p className="text-sm text-slate-500">Add, rename, or remove tasks. Set points for each task; choose “Reference only” for a zero-point habit.</p>
                 </div>
-                <button type="button" onClick={addDraftMetric} className="rounded-xl bg-sky-100 px-4 py-2 font-bold text-sky-800">Add field</button>
+                <button type="button" onClick={addDraftMetric} className="rounded-xl bg-sky-100 px-4 py-2 font-bold text-sky-800">+ Add task</button>
               </div>
-              {draftMetrics.length === 0 && <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No tracking fields yet. Add one to start tracking challenge progress.</p>}
+              {draftMetrics.length === 0 && <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No tasks yet. Select “Add task” to choose what participants should track.</p>}
               <div className="space-y-3">
                 {draftMetrics.map((metric) => (
                   <div key={metric.key} className="grid gap-3 rounded-2xl bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-6">
                     <label className="block lg:col-span-2">
-                      <span className="mb-1 block text-xs font-bold text-slate-500">Field name</span>
+                      <span className="mb-1 block text-xs font-bold text-slate-500">Task name</span>
                       <input value={metric.label} onChange={(event) => updateDraftMetric(metric.key, 'label', event.target.value)} placeholder="e.g. Read 20 pages" className="w-full rounded-xl border border-slate-200 px-3 py-2 font-semibold" />
                     </label>
                     <label className="block">
-                      <span className="mb-1 block text-xs font-bold text-slate-500">Field type</span>
+                      <span className="mb-1 block text-xs font-bold text-slate-500">Task type</span>
                       <select
                         value={metric.inputType}
                         onChange={(event) => {
@@ -733,7 +733,7 @@ export default function ChallengeTrackerPage() {
                       </>
                     )}
                     <label className="block">
-                      <span className="mb-1 block text-xs font-bold text-slate-500">Points</span>
+                      <span className="mb-1 block text-xs font-bold text-slate-500">Points per day</span>
                       <input type="number" min="0" value={metric.scoringType === 'none' ? 0 : metric.points} disabled={metric.scoringType === 'none'} onChange={(event) => updateDraftMetric(metric.key, 'points', Number(event.target.value))} className="w-full rounded-xl border border-slate-200 px-3 py-2 disabled:bg-slate-100" />
                     </label>
                     <div className="flex items-end justify-end">
@@ -742,6 +742,10 @@ export default function ChallengeTrackerPage() {
                   </div>
                 ))}
               </div>
+            </div>
+            <div className="mb-2">
+              <h3 className="text-lg font-black">2. Participant goals</h3>
+              <p className="text-sm text-slate-500">Set a target for each participant on tasks that use a goal-based scoring rule.</p>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               {draftParticipants.map((participant) => (
