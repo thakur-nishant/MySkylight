@@ -11,6 +11,8 @@ A household calendar and task management app inspired by Skylight Calendar. Mana
 - Frontend now uses protected routes with JWT session restore (`/api/auth/me`) on refresh
 - Insights view includes scoreboards, completion counts, and date-range summaries
 - Calendar feed endpoint is available for rendering task events in day/week/month views
+- Users now belong to a household; registration creates a household and makes the registering user its head
+- Heads of household can invite members from the Household page (accounts are created with a temporary password)
 
 ## Features
 
@@ -21,13 +23,43 @@ A household calendar and task management app inspired by Skylight Calendar. Mana
 - **Star rewards** – Earn stars for completing tasks
 - **Insights & scoring** – Review user scores, top tasks, and completion activity over time
 - **Filters** – Filter tasks by assignee/type and completions by date/user/task
+- **Households** – Register a household, then invite members from the Household page
 
 ## Authentication flow
 
+- `POST /api/auth/register` requires a `household_name`; it creates the household and makes the registering user its head
 - `POST /api/auth/login` issues a JWT token
 - Client stores the token in `localStorage`
 - On app load, `AuthContext` calls `GET /api/auth/me` to restore the session
 - Unauthenticated users are redirected to `/login`
+- The head of household can invite members via `POST /api/household/invite`; invited accounts are created with the temporary password `Test@123` (override with `DEFAULT_MEMBER_PASSWORD`)
+
+### Existing databases
+
+On startup, `server/database.js` automatically backfills a `MySkylight Household` for users that predate households and makes the oldest user its head. To do it manually instead, run:
+
+```sql
+CREATE TABLE IF NOT EXISTS households (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  head_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE users ADD COLUMN household_id INTEGER REFERENCES households(id) ON DELETE CASCADE;
+ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member';
+
+INSERT INTO households (name) VALUES ('MySkylight Household');
+UPDATE users
+SET household_id = (SELECT id FROM households ORDER BY id LIMIT 1)
+WHERE household_id IS NULL;
+UPDATE households
+SET head_user_id = (SELECT id FROM users WHERE household_id = households.id ORDER BY id LIMIT 1)
+WHERE head_user_id IS NULL;
+UPDATE users
+SET role = 'head'
+WHERE id IN (SELECT head_user_id FROM households WHERE head_user_id IS NOT NULL);
+```
 
 ## Quick start
 
@@ -48,6 +80,7 @@ Backend (`server/server.js`):
 
 - `PORT` (optional): API port (default `3001`)
 - `JWT_SECRET` (optional): token signing secret (defaults to development value)
+- `DEFAULT_MEMBER_PASSWORD` (optional): temporary password for invited members (default `Test@123`)
 
 Frontend (`client/src/api.js`):
 
@@ -227,15 +260,17 @@ All endpoints below are under `http://localhost:3001`. Most routes require `Auth
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/api/auth/register` | Register a user |
+| POST | `/api/auth/register` | Create a household and its head user (`household_name` required) |
 | POST | `/api/auth/login` | Log in and receive JWT |
 | GET | `/api/auth/me` | Get current authenticated user |
 
-### Users
+### Users & household
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/api/users` | List users for assignments |
+| GET | `/api/users` | List users in the current household for assignments |
+| GET | `/api/household` | Get the current household and its members |
+| POST | `/api/household/invite` | Head of household creates a member account (temporary password) |
 
 ### Shared tasks & completions
 

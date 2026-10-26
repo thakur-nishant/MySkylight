@@ -14,21 +14,63 @@ const GOOGLE_ENABLED = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLI
 const WORKFLOW_STATUSES = new Set(['backlog', 'todo', 'in_progress', 'done']);
 const VALID_TASK_TYPES = new Set(['daily', 'weekly', 'monthly', 'one-time', 'event']);
 
+const DEFAULT_MEMBER_PASSWORD = process.env.DEFAULT_MEMBER_PASSWORD || 'Test@123';
+
+const USER_WITH_HOUSEHOLD_SELECT = `
+  SELECT u.id, u.name, u.email, u.color, u.household_id, u.role, h.name as household_name
+  FROM users u
+  LEFT JOIN households h ON h.id = u.household_id
+`;
+
+function toPublicUser(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    color: user.color,
+    household_id: user.household_id,
+    household_name: user.household_name,
+    role: user.role,
+  };
+}
 
 // Auth routes
 app.post('/api/auth/register', (req, res) => {
   try {
-    const { name, email, password, color } = req.body;
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: 'Name, email, and password required' });
+    const { name, email, password, color, household_name } = req.body ?? {};
+    const trimmedName = name?.trim();
+    const trimmedEmail = email?.trim();
+    const trimmedHouseholdName = household_name?.trim();
+
+    if (!trimmedName || !trimmedEmail || !password || !trimmedHouseholdName) {
+      return res.status(400).json({ error: 'Name, email, password, and household name required' });
     }
+
+    const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(trimmedEmail);
+    if (existingUser) {
+      return res.status(400).json({ error: 'Email already registered' });
+    }
+
     const password_hash = hashPassword(password);
-    const result = db.prepare(`
-      INSERT INTO users (name, email, password_hash, color)
-      VALUES (?, ?, ?, ?)
-    `).run(name, email, password_hash, color || '#6366f1');
-    const user = db.prepare('SELECT id, name, email, color FROM users WHERE id = ?').get(result.lastInsertRowid);
-    res.json({ user, token: createToken(user) });
+    const householdResult = db.prepare('INSERT INTO households (name) VALUES (?)').run(trimmedHouseholdName);
+    const householdId = householdResult.lastInsertRowid;
+
+    let result;
+    try {
+      result = db.prepare(`
+        INSERT INTO users (name, email, password_hash, color, household_id, role)
+        VALUES (?, ?, ?, ?, ?, 'head')
+      `).run(trimmedName, trimmedEmail, password_hash, color || '#6366f1', householdId);
+    } catch (err) {
+      // Don't leave an empty household behind if the user insert fails.
+      db.prepare('DELETE FROM households WHERE id = ?').run(householdId);
+      throw err;
+    }
+
+    db.prepare('UPDATE households SET head_user_id = ? WHERE id = ?').run(result.lastInsertRowid, householdId);
+
+    const user = db.prepare(`${USER_WITH_HOUSEHOLD_SELECT} WHERE u.id = ?`).get(result.lastInsertRowid);
+    res.json({ user: toPublicUser(user), token: createToken(user) });
   } catch (err) {
     if (err.message?.includes('UNIQUE constraint failed') || err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
       return res.status(400).json({ error: 'Email already registered' });
@@ -44,13 +86,17 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(400).json({ error: 'Email and password are required' });
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  const user = db.prepare(`
+    SELECT u.*, h.name as household_name
+    FROM users u
+    LEFT JOIN households h ON h.id = u.household_id
+    WHERE u.email = ?
+  `).get(email.trim());
   if (!user || !verifyPassword(password, user.password_hash)) {
     return res.status(401).json({ error: 'Invalid email or password' });
   }
 
-  const { password_hash, ...safeUser } = user;
-  const safeUserObj = { id: safeUser.id, name: safeUser.name, email: safeUser.email, color: safeUser.color };
+  const safeUserObj = toPublicUser(user);
   res.json({ user: safeUserObj, token: createToken(safeUserObj) });
 });
 
@@ -58,10 +104,80 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
   res.json(req.user);
 });
 
-// Users list (for assignment dropdowns)
+// Users list (for assignment dropdowns), limited to the current household
 app.get('/api/users', authMiddleware, (req, res) => {
-  const users = db.prepare('SELECT id, name, email, color FROM users ORDER BY name').all();
+  const users = db.prepare(`
+    SELECT id, name, email, color, role
+    FROM users
+    WHERE household_id = ?
+    ORDER BY CASE role WHEN 'head' THEN 0 ELSE 1 END, name
+  `).all(req.user.household_id);
   res.json(users);
+});
+
+// Household details + members
+app.get('/api/household', authMiddleware, (req, res) => {
+  const household = db.prepare(`
+    SELECT h.id, h.name, h.head_user_id, h.created_at,
+      head.name as head_name, head.email as head_email
+    FROM households h
+    LEFT JOIN users head ON head.id = h.head_user_id
+    WHERE h.id = ?
+  `).get(req.user.household_id);
+
+  if (!household) {
+    return res.status(404).json({ error: 'Household not found' });
+  }
+
+  const members = db.prepare(`
+    SELECT id, name, email, color, role, created_at
+    FROM users
+    WHERE household_id = ?
+    ORDER BY CASE role WHEN 'head' THEN 0 ELSE 1 END, name
+  `).all(req.user.household_id);
+
+  res.json({ ...household, members });
+});
+
+// Head of household invites a new member (account is created with a temporary password)
+app.post('/api/household/invite', authMiddleware, (req, res) => {
+  if (req.user.role !== 'head') {
+    return res.status(403).json({ error: 'Only the head of household can invite members' });
+  }
+
+  const { name, email, color } = req.body ?? {};
+  if (!name?.trim() || !email?.trim()) {
+    return res.status(400).json({ error: 'Name and email are required' });
+  }
+
+  const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(email.trim());
+  if (existingUser) {
+    return res.status(400).json({ error: 'Email already registered' });
+  }
+
+  try {
+    const result = db.prepare(`
+      INSERT INTO users (name, email, password_hash, color, household_id, role)
+      VALUES (?, ?, ?, ?, ?, 'member')
+    `).run(
+      name.trim(),
+      email.trim(),
+      hashPassword(DEFAULT_MEMBER_PASSWORD),
+      color || '#6366f1',
+      req.user.household_id
+    );
+
+    const user = db.prepare(`${USER_WITH_HOUSEHOLD_SELECT} WHERE u.id = ?`).get(result.lastInsertRowid);
+    res.status(201).json({
+      user: toPublicUser(user),
+      temporaryPassword: DEFAULT_MEMBER_PASSWORD,
+    });
+  } catch (err) {
+    if (err.message?.includes('UNIQUE constraint failed') || err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return res.status(400).json({ error: 'Email already registered' });
+    }
+    throw err;
+  }
 });
 
 // Projects
@@ -1279,9 +1395,10 @@ app.get('/api/insights/scores', authMiddleware, (req, res) => {
     FROM users u
     LEFT JOIN task_completions tc ON ${completionJoinFilters.join(' AND ')}
     LEFT JOIN tasks t ON t.id = tc.task_id AND t.is_personal = 0
+    WHERE u.household_id = ?
     GROUP BY u.id
     ORDER BY total_stars DESC
-  `).all(...params);
+  `).all(...params, req.user.household_id);
   res.json(scores);
 });
 
@@ -1299,6 +1416,8 @@ app.get('/api/insights/task-counts', authMiddleware, (req, res) => {
   if (task_id) { sql += ' AND tc.task_id = ?'; params.push(task_id); }
   if (start_date) { sql += ' AND date(tc.completed_at) >= ?'; params.push(start_date); }
   if (end_date) { sql += ' AND date(tc.completed_at) <= ?'; params.push(end_date); }
+  sql += ' AND u.household_id = ?';
+  params.push(req.user.household_id);
   sql += ' GROUP BY tc.user_id, tc.task_id ORDER BY t.title, count DESC';
 
   const counts = db.prepare(sql).all(...params);

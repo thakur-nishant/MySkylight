@@ -6,6 +6,7 @@ export default function Login() {
   const [email, setEmail] = useState('demo@myskylight.app');
   const [password, setPassword] = useState('demo123');
   const [name, setName] = useState('');
+  const [householdName, setHouseholdName] = useState('');
   const [color, setColor] = useState('#6366f1');
   const [error, setError] = useState('');
   const [isRegister, setIsRegister] = useState(false);
@@ -20,13 +21,26 @@ export default function Login() {
     }
   }, [user, loading, navigate]);
 
+  const toggleMode = () => {
+    const nextIsRegister = !isRegister;
+    setIsRegister(nextIsRegister);
+    setError('');
+    if (nextIsRegister) {
+      setEmail('');
+      setPassword('');
+    } else {
+      setEmail('demo@myskylight.app');
+      setPassword('demo123');
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
 
     try {
       if (isRegister) {
-        await register({ name, email, password, color });
+        await register({ name, email, password, color, household_name: householdName });
       } else {
         await login(email, password);
       }
@@ -46,13 +60,24 @@ export default function Login() {
         </div>
         <div className="bg-white rounded-2xl shadow-xl shadow-sky-100/50 border border-slate-200 p-8">
           <h2 className="font-display font-semibold text-xl text-slate-800 mb-6">
-            {isRegister ? 'Create account' : 'Sign in'}
+            {isRegister ? 'Create household' : 'Sign in'}
           </h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             {isRegister && (
               <>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Household name</label>
+                  <input
+                    type="text"
+                    value={householdName}
+                    onChange={(e) => setHouseholdName(e.target.value)}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                    required
+                    placeholder="e.g. The Sharma Family"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Your name</label>
                   <input
                     type="text"
                     value={name}
@@ -114,17 +139,17 @@ export default function Login() {
               className="w-full py-3 bg-sky-600 hover:bg-sky-700 text-white font-medium rounded-lg transition-colors"
               disabled={loading} // prevent submitting while auth loading
             >
-              {isRegister ? 'Create account' : 'Sign in'}
+              {isRegister ? 'Create household' : 'Sign in'}
             </button>
           </form>
           <p className="mt-6 text-center text-slate-600">
-            {isRegister ? 'Already have an account?' : "Don't have an account?"}{' '}
+            {isRegister ? 'Already have a household?' : 'New to MySkylight?'}{' '}
             <button
               type="button"
-              onClick={() => setIsRegister(!isRegister)}
+              onClick={toggleMode}
               className="text-sky-600 font-medium hover:underline"
             >
-              {isRegister ? 'Sign in' : 'Create account'}
+              {isRegister ? 'Sign in' : 'Create household'}
             </button>
           </p>
         </div>

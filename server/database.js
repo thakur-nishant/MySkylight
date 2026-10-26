@@ -73,12 +73,21 @@ function saveDb() {
 
 // Initialize schema
 db.exec(`
+  CREATE TABLE IF NOT EXISTS households (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    head_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     color TEXT DEFAULT '#6366f1',
+    household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+    role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('head', 'member')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -225,6 +234,15 @@ const hasColorColumn = userColumns.some((column) => column.name === 'color');
 if (!hasColorColumn) {
   db.exec("ALTER TABLE users ADD COLUMN color TEXT DEFAULT '#6366f1'");
 }
+const hasHouseholdIdColumn = userColumns.some((column) => column.name === 'household_id');
+if (!hasHouseholdIdColumn) {
+  db.exec('ALTER TABLE users ADD COLUMN household_id INTEGER REFERENCES households(id) ON DELETE CASCADE');
+}
+const hasRoleColumn = userColumns.some((column) => column.name === 'role');
+if (!hasRoleColumn) {
+  db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member'");
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_users_household ON users(household_id)');
 
 const taskColumns = db.prepare('PRAGMA table_info(tasks)').all();
 const hasIsPersonalColumn = taskColumns.some((column) => column.name === 'is_personal');
@@ -261,16 +279,62 @@ db.prepare(`
   WHERE recurrence_pattern = 'personal_tracker'
 `).run();
 
+// Backfill households for users created before households existed.
+// Every user must belong to a household; the oldest user becomes the head.
+const usersWithoutHousehold = db.prepare(`
+  SELECT id FROM users WHERE household_id IS NULL ORDER BY id
+`).all();
+if (usersWithoutHousehold.length > 0) {
+  let defaultHousehold = db.prepare('SELECT id, head_user_id FROM households ORDER BY id LIMIT 1').get();
+  if (!defaultHousehold) {
+    const result = db.prepare('INSERT INTO households (name) VALUES (?)').run('MySkylight Household');
+    defaultHousehold = { id: result.lastInsertRowid, head_user_id: null };
+  }
+
+  const assignHousehold = db.prepare('UPDATE users SET household_id = ? WHERE id = ?');
+  for (const user of usersWithoutHousehold) {
+    assignHousehold.run(defaultHousehold.id, user.id);
+  }
+
+  if (!defaultHousehold.head_user_id) {
+    const headUserId = usersWithoutHousehold[0].id;
+    db.prepare('UPDATE households SET head_user_id = ? WHERE id = ?').run(headUserId, defaultHousehold.id);
+    db.prepare("UPDATE users SET role = 'head' WHERE id = ?").run(headUserId);
+  }
+}
+
+// Guarantee that each household has a head.
+const householdsWithoutHead = db.prepare('SELECT id FROM households WHERE head_user_id IS NULL').all();
+for (const household of householdsWithoutHead) {
+  const firstMember = db.prepare('SELECT id FROM users WHERE household_id = ? ORDER BY id LIMIT 1').get(household.id);
+  if (firstMember) {
+    db.prepare('UPDATE households SET head_user_id = ? WHERE id = ?').run(firstMember.id, household.id);
+    db.prepare("UPDATE users SET role = 'head' WHERE id = ?").run(firstMember.id);
+  }
+}
+
+saveDb();
+
 // Seed default data if empty
 const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get();
 if (userCount.count === 0) {
   const bcrypt = (await import('bcryptjs')).default;
   const hash = bcrypt.hashSync('demo123', 10);
+
+  const householdResult = db.prepare('INSERT INTO households (name) VALUES (?)').run('MySkylight Household');
+  const householdId = householdResult.lastInsertRowid;
+
+  const demoUserResult = db.prepare(`
+    INSERT INTO users (name, email, password_hash, color, household_id, role)
+    VALUES (?, ?, ?, ?, ?, 'head')
+  `).run('Demo User', 'demo@myskylight.app', hash, '#6366f1', householdId);
+
   db.prepare(`
-    INSERT INTO users (name, email, password_hash, color) VALUES
-    ('Demo User', 'demo@myskylight.app', ?, '#6366f1'),
-    ('Family Member', 'family@myskylight.app', ?, '#ec4899')
-  `).run(hash, hash);
+    INSERT INTO users (name, email, password_hash, color, household_id, role)
+    VALUES (?, ?, ?, ?, ?, 'member')
+  `).run('Family Member', 'family@myskylight.app', hash, '#ec4899', householdId);
+
+  db.prepare('UPDATE households SET head_user_id = ? WHERE id = ?').run(demoUserResult.lastInsertRowid, householdId);
 
   db.prepare(`
     INSERT INTO tasks (title, description, task_type, default_stars, is_group_task) VALUES

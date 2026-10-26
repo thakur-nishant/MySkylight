@@ -37,6 +37,11 @@ export const users = {
   list: () => api('/users'),
 };
 
+export const household = {
+  get: () => api('/household'),
+  invite: (data) => api('/household/invite', { method: 'POST', body: JSON.stringify(data) }),
+};
+
 export const projects = {
   list: async (params) => {
     const data = await api('/projects' + (params ? '?' + new URLSearchParams(params).toString() : ''));

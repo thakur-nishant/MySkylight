@@ -11,6 +11,7 @@ import PersonalTrackerPage from './pages/PersonalTrackerPage';
 import ProjectDashboardPage from './pages/ProjectDashboardPage';
 import ChallengeTrackerPage from './pages/ChallengeTrackerPage';
 import TodayPage from './pages/TodayPage';
+import HouseholdPage from './pages/HouseholdPage';
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -49,6 +50,7 @@ function AppRoutes() {
         <Route path="personal-tracker" element={<PersonalTrackerPage />} />
         <Route path="challenge-tracker" element={<ChallengeTrackerPage />} />
         <Route path="insights" element={<InsightsPage />} />
+        <Route path="household" element={<HouseholdPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
