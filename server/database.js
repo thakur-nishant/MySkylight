@@ -183,6 +183,7 @@ db.exec(`
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
     publish_date DATE NOT NULL,
+    metrics_json TEXT,
     created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -206,6 +207,7 @@ db.exec(`
     min_steps INTEGER NOT NULL DEFAULT 0,
     protein_grams INTEGER NOT NULL DEFAULT 0,
     water_liters REAL NOT NULL DEFAULT 0,
+    custom_goals_json TEXT,
     PRIMARY KEY (challenge_id, participant_key)
   );
 
@@ -221,6 +223,7 @@ db.exec(`
     water_liters REAL NOT NULL DEFAULT 0,
     healthy_bonus INTEGER NOT NULL DEFAULT 0,
     sleep_hours REAL NOT NULL DEFAULT 0,
+    custom_values_json TEXT,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(challenge_id, entry_date, participant_key)
   );
@@ -230,6 +233,19 @@ db.exec(`
 `);
 
 // Backward-compatible migration for existing databases.
+const challengeColumns = db.prepare('PRAGMA table_info(challenges)').all();
+if (!challengeColumns.some((column) => column.name === 'metrics_json')) {
+  db.exec('ALTER TABLE challenges ADD COLUMN metrics_json TEXT');
+}
+const challengeGoalColumns = db.prepare('PRAGMA table_info(challenge_goals)').all();
+if (!challengeGoalColumns.some((column) => column.name === 'custom_goals_json')) {
+  db.exec('ALTER TABLE challenge_goals ADD COLUMN custom_goals_json TEXT');
+}
+const challengeEntryColumns = db.prepare('PRAGMA table_info(challenge_daily_entries)').all();
+if (!challengeEntryColumns.some((column) => column.name === 'custom_values_json')) {
+  db.exec('ALTER TABLE challenge_daily_entries ADD COLUMN custom_values_json TEXT');
+}
+
 const userColumns = db.prepare('PRAGMA table_info(users)').all();
 const hasColorColumn = userColumns.some((column) => column.name === 'color');
 if (!hasColorColumn) {
