@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Calendar, ListTodo, BarChart3, LogOut, ChevronsLeft, ChevronsRight, ClipboardCheck, KanbanSquare, Trophy, Sun, Users } from 'lucide-react';
+import { Calendar, ListTodo, BarChart3, LogOut, ChevronsLeft, ChevronsRight, ClipboardCheck, KanbanSquare, Trophy, Sun, Users, UserRound } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 import GoogleCalendarIntegration from './GoogleCalendarIntegration';
 
@@ -26,6 +26,7 @@ export default function Layout() {
     { to: '/challenge-tracker', icon: Trophy, label: 'Challenge Tracker' },
     { to: '/insights', icon: BarChart3, label: 'Insights' },
     { to: '/household', icon: Users, label: 'Household' },
+    { to: '/profile', icon: UserRound, label: 'Profile' },
   ];
 
   return (
@@ -76,12 +77,16 @@ export default function Layout() {
           <ThemeToggle compact={collapsed} />
           {!collapsed && <div className="mt-2"><GoogleCalendarIntegration /></div>}
           <div className={`flex items-center gap-3 ${collapsed ? 'justify-center' : ''}`}>
-            <div
-              className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-medium"
-              style={{ backgroundColor: user?.color || '#6366f1' }}
-            >
-              {user?.name?.charAt(0) || '?'}
-            </div>
+            {user?.avatar ? (
+              <img src={user.avatar} alt="" className="w-9 h-9 rounded-full object-cover" />
+            ) : (
+              <div
+                className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-medium"
+                style={{ backgroundColor: user?.color || '#6366f1' }}
+              >
+                {user?.name?.charAt(0) || '?'}
+              </div>
+            )}
             {!collapsed && (
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-slate-800 truncate dark:text-slate-100">{user?.name}</p>

@@ -45,6 +45,12 @@ export function AuthProvider({ children }) {
     return user;
   };
 
+  const updateProfile = async (data) => {
+    const updatedUser = await authApi.updateProfile(data);
+    setUser(updatedUser);
+    return updatedUser;
+  };
+
   const logout = () => {
     localStorage.removeItem('token');
     setUser(null);
@@ -58,6 +64,7 @@ export function AuthProvider({ children }) {
         isAuthenticated: !!user,
         login,
         register,
+        updateProfile,
         logout,
       }}
     >

@@ -7,7 +7,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
 const GOOGLE_ENABLED = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.SERVER_ORIGIN);
 
@@ -17,7 +17,7 @@ const VALID_TASK_TYPES = new Set(['daily', 'weekly', 'monthly', 'one-time', 'eve
 const DEFAULT_MEMBER_PASSWORD = process.env.DEFAULT_MEMBER_PASSWORD || 'Test@123';
 
 const USER_WITH_HOUSEHOLD_SELECT = `
-  SELECT u.id, u.name, u.email, u.color, u.household_id, u.role, h.name as household_name
+  SELECT u.id, u.name, u.email, u.color, u.avatar, u.household_id, u.role, h.name as household_name
   FROM users u
   LEFT JOIN households h ON h.id = u.household_id
 `;
@@ -28,6 +28,7 @@ function toPublicUser(user) {
     name: user.name,
     email: user.email,
     color: user.color,
+    avatar: user.avatar || null,
     household_id: user.household_id,
     household_name: user.household_name,
     role: user.role,
@@ -104,10 +105,54 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
   res.json(req.user);
 });
 
+app.patch('/api/auth/profile', authMiddleware, (req, res) => {
+  const { name, color, avatar } = req.body ?? {};
+  const updates = {};
+
+  if (Object.hasOwn(req.body ?? {}, 'name')) {
+    if (typeof name !== 'string' || !name.trim() || name.trim().length > 80) {
+      return res.status(400).json({ error: 'Name must be between 1 and 80 characters' });
+    }
+    updates.name = name.trim();
+  }
+
+  if (Object.hasOwn(req.body ?? {}, 'color')) {
+    if (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color)) {
+      return res.status(400).json({ error: 'Choose a valid profile color' });
+    }
+    updates.color = color;
+  }
+
+  if (Object.hasOwn(req.body ?? {}, 'avatar')) {
+    if (avatar !== null && (
+      typeof avatar !== 'string' ||
+      avatar.length > 1_500_000 ||
+      !/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(avatar)
+    )) {
+      return res.status(400).json({ error: 'Profile photo must be a PNG, JPEG, or WebP image under 1 MB' });
+    }
+    updates.avatar = avatar;
+  }
+
+  if (!Object.keys(updates).length) {
+    return res.status(400).json({ error: 'No profile changes provided' });
+  }
+
+  const fields = Object.keys(updates);
+  const assignments = fields.map((field) => `${field} = ?`).join(', ');
+  db.prepare(`UPDATE users SET ${assignments} WHERE id = ?`).run(
+    ...fields.map((field) => updates[field]),
+    req.user.id
+  );
+
+  const user = db.prepare(`${USER_WITH_HOUSEHOLD_SELECT} WHERE u.id = ?`).get(req.user.id);
+  res.json(toPublicUser(user));
+});
+
 // Users list (for assignment dropdowns), limited to the current household
 app.get('/api/users', authMiddleware, (req, res) => {
   const users = db.prepare(`
-    SELECT id, name, email, color, role
+    SELECT id, name, email, color, avatar, role
     FROM users
     WHERE household_id = ?
     ORDER BY CASE role WHEN 'head' THEN 0 ELSE 1 END, name
@@ -130,7 +175,7 @@ app.get('/api/household', authMiddleware, (req, res) => {
   }
 
   const members = db.prepare(`
-    SELECT id, name, email, color, role, created_at
+    SELECT id, name, email, color, avatar, role, created_at
     FROM users
     WHERE household_id = ?
     ORDER BY CASE role WHEN 'head' THEN 0 ELSE 1 END, name
