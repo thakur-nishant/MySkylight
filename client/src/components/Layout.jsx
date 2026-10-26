@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Calendar, ListTodo, BarChart3, LogOut, ChevronsLeft, ChevronsRight, ClipboardCheck, KanbanSquare, Trophy, Sun } from 'lucide-react';
+import { Calendar, ListTodo, BarChart3, LogOut, ChevronsLeft, ChevronsRight, ClipboardCheck, KanbanSquare, Trophy, Sun, Users } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 import GoogleCalendarIntegration from './GoogleCalendarIntegration';
 
@@ -25,6 +25,7 @@ export default function Layout() {
     { to: '/personal-tracker', icon: ClipboardCheck, label: 'Personal Tracker' },
     { to: '/challenge-tracker', icon: Trophy, label: 'Challenge Tracker' },
     { to: '/insights', icon: BarChart3, label: 'Insights' },
+    { to: '/household', icon: Users, label: 'Household' },
   ];
 
   return (
@@ -39,7 +40,7 @@ export default function Layout() {
           {!collapsed && (
             <div>
               <h1 className="font-display font-bold text-xl text-sky-600">MySkylight</h1>
-              <p className="text-sm text-slate-500 mt-1">Calendar & tasks</p>
+              <p className="text-sm text-slate-500 mt-1 truncate">{user?.household_name || 'Calendar & tasks'}</p>
             </div>
           )}
           <button

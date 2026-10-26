@@ -45,7 +45,12 @@ export function authMiddleware(req, res, next) {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 
-  const user = db.prepare('SELECT id, name, email, color FROM users WHERE id = ?').get(payload.id);
+  const user = db.prepare(`
+    SELECT u.id, u.name, u.email, u.color, u.household_id, u.role, h.name as household_name
+    FROM users u
+    LEFT JOIN households h ON h.id = u.household_id
+    WHERE u.id = ?
+  `).get(payload.id);
   if (!user) {
     return res.status(401).json({ error: 'User not found' });
   }
