@@ -1,12 +1,24 @@
 import express from 'express';
 import cors from 'cors';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import db from './database.js';
 import { hashPassword, verifyPassword, createToken, authMiddleware } from './auth.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const clientDist = path.resolve(__dirname, '../client/dist');
+
 const app = express();
 const PORT = process.env.PORT || 3001;
+const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+// The app is normally served behind Caddy, which terminates TLS.
+app.set('trust proxy', 1);
+app.use(cors({ origin: CORS_ORIGINS, credentials: true }));
 app.use(express.json({ limit: '2mb' }));
 
 const GOOGLE_ENABLED = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.SERVER_ORIGIN);
@@ -15,6 +27,7 @@ const WORKFLOW_STATUSES = new Set(['backlog', 'todo', 'in_progress', 'done']);
 const VALID_TASK_TYPES = new Set(['daily', 'weekly', 'monthly', 'one-time', 'event']);
 
 const DEFAULT_MEMBER_PASSWORD = process.env.DEFAULT_MEMBER_PASSWORD || 'Test@123';
+const ALLOW_REGISTRATION = process.env.ALLOW_REGISTRATION !== 'false';
 
 const USER_WITH_HOUSEHOLD_SELECT = `
   SELECT u.id, u.name, u.email, u.color, u.avatar, u.household_id, u.role, h.name as household_name
@@ -37,6 +50,12 @@ function toPublicUser(user) {
 
 // Auth routes
 app.post('/api/auth/register', (req, res) => {
+  if (!ALLOW_REGISTRATION) {
+    return res.status(403).json({
+      error: 'Registration is disabled. Ask the head of your household for an invite.',
+    });
+  }
+
   try {
     const { name, email, password, color, household_name } = req.body ?? {};
     const trimmedName = name?.trim();
@@ -1625,6 +1644,33 @@ app.get('/api/calendar/events', authMiddleware, async (req, res) => {
 
   res.json(events);
 });
+
+// Unknown API routes should return JSON, not the SPA shell.
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// In production, serve the built client from the same origin as the API.
+if (fs.existsSync(path.join(clientDist, 'index.html'))) {
+  app.use(
+    express.static(clientDist, {
+      index: false,
+      maxAge: '1h',
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('index.html')) {
+          res.setHeader('Cache-Control', 'no-cache');
+        }
+      },
+    })
+  );
+
+  // SPA fallback for client-side routes.
+  app.get('*', (req, res, next) => {
+    if (req.path === '/api' || req.path.startsWith('/api/')) return next();
+    res.setHeader('Cache-Control', 'no-cache');
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+}
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`MySkylight server running on http://localhost:${PORT}`);

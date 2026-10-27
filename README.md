@@ -76,19 +76,23 @@ npm run dev
 
 ### Environment variables
 
-Backend (`server/server.js`):
+Backend (`server/server.js`, `server/auth.js`):
 
 - `PORT` (optional): API port (default `3001`)
-- `JWT_SECRET` (optional): token signing secret (defaults to development value)
-- `DEFAULT_MEMBER_PASSWORD` (optional): temporary password for invited members (default `Test@123`)
+- `JWT_SECRET`: token signing secret. Required when `NODE_ENV=production`; local development falls back to a known value.
+- `SERVER_ORIGIN`: public HTTPS origin, e.g. `https://myskylight.duckdns.org`. Used for Google Calendar OAuth callbacks.
+- `CORS_ORIGIN` (optional): comma-separated allowed origins (default `http://localhost:5173`). Same-origin deployments do not need to change this.
+- `DEFAULT_MEMBER_PASSWORD` (optional): temporary password for invited members (default `Test@123`). Set a strong value in production.
+- `ALLOW_REGISTRATION` (optional): set to `false` after creating your household to disable public registration (default `true`).
+- `SEED_DEMO` (optional): demo data is seeded only when the database is empty and `NODE_ENV` is not `production`. Set to `true` to force it or `false` to disable it.
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (optional): enable Google Calendar integration.
 
-Frontend (`client/src/api.js`):
-
-- `VITE_API_URL` (optional): explicit API base URL
-- If unset, the client defaults to `http://localhost:3001/api` in local dev and `/api` in production
+Frontend: the client always calls the relative `/api` base. Vite proxies `/api` to the backend during development, and in production the same origin serves both the app and the API.
 
 
 ## Demo credentials
+
+Demo data is only seeded in development (or with `SEED_DEMO=true`):
 
 - Email: `demo@myskylight.app`
 - Password: `demo123`
@@ -129,12 +133,16 @@ npm run start       # run backend in non-watch mode
 
 ## Production deployment
 
+For a complete walkthrough using **Oracle Cloud Always Free + DuckDNS + Caddy**, see [`DEPLOY.md`](DEPLOY.md).
+
 This project is split into:
 
 - a static frontend build (`client/dist`)
 - a Node.js API server (`server/server.js`)
 
-Use the flow below for a production environment.
+When `client/dist` exists, the Express server serves it directly, including the SPA fallback. A reverse proxy such as Caddy only needs to forward all traffic to port `3001`.
+
+The Apache example below is an alternative if you prefer to serve the static build separately.
 
 ### 1) Build and prepare artifacts
 

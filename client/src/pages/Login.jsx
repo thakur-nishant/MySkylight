@@ -2,9 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
+// Demo credentials are only useful in local development.
+const DEMO_EMAIL = import.meta.env.DEV ? 'demo@myskylight.app' : '';
+const DEMO_PASSWORD = import.meta.env.DEV ? 'demo123' : '';
+
 export default function Login() {
-  const [email, setEmail] = useState('demo@myskylight.app');
-  const [password, setPassword] = useState('demo123');
+  const [email, setEmail] = useState(DEMO_EMAIL);
+  const [password, setPassword] = useState(DEMO_PASSWORD);
   const [name, setName] = useState('');
   const [householdName, setHouseholdName] = useState('');
   const [color, setColor] = useState('#6366f1');
@@ -29,8 +33,8 @@ export default function Login() {
       setEmail('');
       setPassword('');
     } else {
-      setEmail('demo@myskylight.app');
-      setPassword('demo123');
+      setEmail(DEMO_EMAIL);
+      setPassword(DEMO_PASSWORD);
     }
   };
 
@@ -127,7 +131,7 @@ export default function Login() {
                 required
                 placeholder="••••••••"
               />
-              {!isRegister && (
+              {!isRegister && import.meta.env.DEV && (
                 <p className="text-xs text-slate-500 mt-1">Demo: demo@myskylight.app / demo123</p>
               )}
             </div>

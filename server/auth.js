@@ -5,6 +5,13 @@ import db from './database.js';
 const JWT_SECRET = process.env.JWT_SECRET || 'myskylight-secret-change-in-production';
 const JWT_EXPIRY = '7d';
 
+if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET must be set when NODE_ENV=production');
+}
+if (!process.env.JWT_SECRET) {
+  console.warn('JWT_SECRET is not set; using the development secret.');
+}
+
 export function hashPassword(password) {
   return bcrypt.hashSync(password, 10);
 }

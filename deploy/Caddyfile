@@ -1,0 +1,13 @@
+# Replace myskylight.duckdns.org with your DuckDNS hostname.
+# Caddy obtains and renews the TLS certificate automatically.
+myskylight.duckdns.org {
+    encode gzip
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+
+    reverse_proxy 127.0.0.1:3001
+}
