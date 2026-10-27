@@ -16,11 +16,14 @@ import {
   Trophy,
   Utensils,
 } from 'lucide-react';
-import { challengeTracker } from '../api';
+import { challengeTracker, users } from '../api';
+import { useQuery } from '../hooks/useQuery';
 
-const defaultParticipants = [
-  { id: 'demo@myskylight.app', email: 'demo@myskylight.app', name: 'Demo User', color: 'from-fuchsia-500 to-rose-500', text: 'text-fuchsia-700' },
-  { id: 'family@myskylight.app', email: 'family@myskylight.app', name: 'Family Member', color: 'from-sky-500 to-cyan-500', text: 'text-sky-700' },
+const participantStyles = [
+  { color: 'from-fuchsia-500 to-rose-500', text: 'text-fuchsia-700' },
+  { color: 'from-sky-500 to-cyan-500', text: 'text-sky-700' },
+  { color: 'from-emerald-500 to-teal-500', text: 'text-emerald-700' },
+  { color: 'from-amber-500 to-orange-500', text: 'text-amber-700' },
 ];
 
 const defaultChallenge = {
@@ -91,6 +94,27 @@ function goalFieldKey(metricKey) {
   return metricKey;
 }
 
+function makeParticipant(member, index) {
+  const style = participantStyles[index % participantStyles.length];
+  const email = String(member.email || '').trim().toLowerCase();
+  return {
+    id: email,
+    email,
+    name: member.name,
+    ...style,
+  };
+}
+
+function defaultGoalsForParticipant(email) {
+  return defaultGoals[email] || {
+    maxCalories: 0,
+    workoutMinutes: 0,
+    minSteps: 0,
+    proteinGrams: 0,
+    waterLiters: 0,
+  };
+}
+
 function scoreMetric(entry, goals, metric) {
   const value = entry[metric.key];
   const goal = Number(goals?.[goalFieldKey(metric.key)]) || 0;
@@ -118,7 +142,7 @@ function makeEmptyEntry(metrics = defaultMetrics) {
 }
 
 function createInitialScores(days, participantIds, metrics = defaultMetrics) {
-  const ids = participantIds?.length ? participantIds : defaultParticipants.map((p) => p.id);
+  const ids = participantIds || [];
   return days.reduce((allScores, day) => {
     const dayKey = formatDayKey(day);
     allScores[dayKey] = ids.reduce((entries, participantId) => {
@@ -151,6 +175,11 @@ function ProgressBar({ value, max, gradient = 'from-emerald-400 to-teal-500' }) 
 }
 
 export default function ChallengeTrackerPage() {
+  const { data: householdMemberData, loading: householdMembersLoading, error: householdMembersError } = useQuery(
+    ['challenge-household-members'],
+    () => users.list(),
+  );
+  const householdMembers = Array.isArray(householdMemberData) ? householdMemberData : [];
   const [challenge, setChallenge] = useState(defaultChallenge);
   const [challengeId, setChallengeId] = useState(null);
   const [challengeList, setChallengeList] = useState({ active: [], past: [] });
@@ -158,8 +187,8 @@ export default function ChallengeTrackerPage() {
   const [draftChallenge, setDraftChallenge] = useState(defaultChallenge);
   const [metrics, setMetrics] = useState(defaultMetrics);
   const [draftMetrics, setDraftMetrics] = useState(defaultMetrics);
-  const [participants, setParticipants] = useState(defaultParticipants);
-  const [draftParticipants, setDraftParticipants] = useState(defaultParticipants);
+  const [participants, setParticipants] = useState([]);
+  const [draftParticipants, setDraftParticipants] = useState([]);
   const [showChallengeForm, setShowChallengeForm] = useState(false);
   const days = useMemo(() => buildChallengeDays(challenge.startDate, challenge.endDate), [challenge.startDate, challenge.endDate]);
   const [goals, setGoals] = useState(defaultGoals);
@@ -167,7 +196,7 @@ export default function ChallengeTrackerPage() {
   const [selectedDay, setSelectedDay] = useState(defaultChallenge.startDate);
   const [scores, setScores] = useState(() => createInitialScores(
     buildChallengeDays(defaultChallenge.startDate, defaultChallenge.endDate),
-    defaultParticipants.map((p) => p.id),
+    [],
   ));
   const maxDailyPoints = metrics.reduce(
     (total, metric) => total + (metric.scoringType === 'none' ? 0 : Number(metric.points) || 0),
@@ -178,7 +207,13 @@ export default function ChallengeTrackerPage() {
   const applyChallengeState = (state) => {
     if (!state || !state.challenge) return;
 
-    const participantIds = state.participants.map((participant) => participant.id);
+    const loadedParticipants = state.participants.map((participant, index) => {
+      const householdMember = householdMembers.find(
+        (member) => member.email.toLowerCase() === participant.email.toLowerCase(),
+      );
+      return householdMember ? makeParticipant(householdMember, index) : participant;
+    });
+    const participantIds = loadedParticipants.map((participant) => participant.id);
     const challengeDays = buildChallengeDays(state.challenge.startDate, state.challenge.endDate);
     const loadedMetrics = Array.isArray(state.challenge.metrics) ? state.challenge.metrics : defaultMetrics;
 
@@ -187,8 +222,8 @@ export default function ChallengeTrackerPage() {
     setDraftChallenge(state.challenge);
     setMetrics(loadedMetrics);
     setDraftMetrics(loadedMetrics);
-    setParticipants(state.participants);
-    setDraftParticipants(state.participants);
+    setParticipants(loadedParticipants);
+    setDraftParticipants(loadedParticipants);
     setGoals(state.goals);
     setDraftGoals(state.goals);
     setScores(mergeScoresForDays(state.scores, challengeDays, participantIds, loadedMetrics));
@@ -229,13 +264,13 @@ export default function ChallengeTrackerPage() {
           setChallenge(defaultChallenge);
           setMetrics(defaultMetrics);
           setDraftMetrics(defaultMetrics);
-          setParticipants(defaultParticipants);
-          setDraftParticipants(defaultParticipants);
-          setGoals(defaultGoals);
-          setDraftGoals(defaultGoals);
+          setParticipants([]);
+          setDraftParticipants([]);
+          setGoals({});
+          setDraftGoals({});
           setScores(createInitialScores(
             buildChallengeDays(defaultChallenge.startDate, defaultChallenge.endDate),
-            defaultParticipants.map((p) => p.id),
+            [],
           ));
           setSelectedDay(defaultChallenge.startDate);
         }
@@ -347,38 +382,46 @@ export default function ChallengeTrackerPage() {
     setDraftMetrics((current) => current.filter((metric) => metric.key !== metricKey));
   };
 
-  const updateDraftParticipant = (participantId, field, value) => {
-    if (field === 'name') {
-      setDraftParticipants((current) => current.map((participant) => (
-        participant.id === participantId ? { ...participant, name: value } : participant
-      )));
-      return;
-    }
-
-    if (field === 'email') {
-      const newEmail = (value || '').trim();
-      const newId = newEmail ? newEmail.toLowerCase() : participantId;
-
-      // Update participants list (id and email)
-      setDraftParticipants((current) => current.map((participant) => (
-        participant.id === participantId ? { ...participant, email: newEmail, id: newId } : participant
-      )));
-
-      // Move goals from old id to new id if necessary
+  const updateDraftParticipant = (participantIndex, email) => {
+    const member = householdMembers.find((householdMember) => householdMember.email.toLowerCase() === email);
+    if (!member) return;
+    const previousParticipant = draftParticipants[participantIndex];
+    if (!previousParticipant) return;
+    const selectedParticipant = makeParticipant(member, participantIndex);
+    setDraftParticipants((current) => current.map((participant, index) => (
+      index === participantIndex ? selectedParticipant : participant
+    )));
+    if (previousParticipant.id !== selectedParticipant.id) {
       setDraftGoals((current) => {
-        if (!newId || newId === participantId) return current;
         const next = { ...current };
-        next[newId] = next[participantId] || {
-          maxCalories: 0,
-          workoutMinutes: 0,
-          minSteps: 0,
-          proteinGrams: 0,
-          waterLiters: 0,
-        };
-        if (participantId in next) delete next[participantId];
+        delete next[previousParticipant.id];
+        next[selectedParticipant.id] = current[selectedParticipant.id]
+          || defaultGoalsForParticipant(selectedParticipant.id);
         return next;
       });
     }
+  };
+
+  const addDraftParticipant = () => {
+    const selectedEmails = new Set(draftParticipants.map((participant) => participant.email.toLowerCase()));
+    const nextMember = householdMembers.find((member) => !selectedEmails.has(member.email.toLowerCase()));
+    if (!nextMember) return;
+    const participant = makeParticipant(nextMember, draftParticipants.length);
+    setDraftParticipants((current) => [...current, participant]);
+    setDraftGoals((current) => ({
+      ...current,
+      [participant.id]: current[participant.id] || defaultGoalsForParticipant(participant.id),
+    }));
+  };
+
+  const removeDraftParticipant = (participantId) => {
+    if (draftParticipants.length <= 1) return;
+    setDraftParticipants((current) => current.filter((participant) => participant.id !== participantId));
+    setDraftGoals((current) => {
+      const next = { ...current };
+      delete next[participantId];
+      return next;
+    });
   };
 
   const saveChallenge = async () => {
@@ -436,16 +479,16 @@ export default function ChallengeTrackerPage() {
       setChallenge(defaultChallenge);
       setMetrics(defaultMetrics);
       setDraftMetrics(defaultMetrics);
-      setParticipants(defaultParticipants);
+      setParticipants([]);
       setDraftChallenge(defaultChallenge);
-      setDraftParticipants(defaultParticipants);
-      setGoals(defaultGoals);
-      setDraftGoals(defaultGoals);
+      setDraftParticipants([]);
+      setGoals({});
+      setDraftGoals({});
       setShowChallengeForm(false);
       setSelectedDay(defaultChallenge.startDate);
       setScores(createInitialScores(
         buildChallengeDays(defaultChallenge.startDate, defaultChallenge.endDate),
-        defaultParticipants.map((p) => p.id),
+        [],
       ));
       await refreshChallengeList();
     } catch (error) {
@@ -467,16 +510,16 @@ export default function ChallengeTrackerPage() {
         setChallenge(defaultChallenge);
         setMetrics(defaultMetrics);
         setDraftMetrics(defaultMetrics);
-        setParticipants(defaultParticipants);
+        setParticipants([]);
         setDraftChallenge(defaultChallenge);
-        setDraftParticipants(defaultParticipants);
-        setGoals(defaultGoals);
-        setDraftGoals(defaultGoals);
+        setDraftParticipants([]);
+        setGoals({});
+        setDraftGoals({});
         setShowChallengeForm(false);
         setSelectedDay(defaultChallenge.startDate);
         setScores(createInitialScores(
           buildChallengeDays(defaultChallenge.startDate, defaultChallenge.endDate),
-          defaultParticipants.map((p) => p.id),
+          [],
         ));
       }
       await refreshChallengeList();
@@ -486,20 +529,26 @@ export default function ChallengeTrackerPage() {
   };
 
   const startNewChallenge = () => {
+    if (!householdMembers.length || householdMembersLoading) return;
+    const newParticipants = householdMembers.map((member, index) => makeParticipant(member, index));
+    const newGoals = Object.fromEntries(newParticipants.map((participant) => [
+      participant.id,
+      defaultGoalsForParticipant(participant.id),
+    ]));
     setSelectedChallengeId(null);
     setChallengeId(null);
     setChallenge(defaultChallenge);
     setMetrics(defaultMetrics);
     setDraftMetrics(defaultMetrics);
-    setParticipants(defaultParticipants);
+    setParticipants(newParticipants);
     setDraftChallenge(defaultChallenge);
-    setDraftParticipants(defaultParticipants);
-    setGoals(defaultGoals);
-    setDraftGoals(defaultGoals);
+    setDraftParticipants(newParticipants);
+    setGoals(newGoals);
+    setDraftGoals(newGoals);
     setSelectedDay(defaultChallenge.startDate);
     setScores(createInitialScores(
       buildChallengeDays(defaultChallenge.startDate, defaultChallenge.endDate),
-      defaultParticipants.map((p) => p.id),
+      newParticipants.map((p) => p.id),
     ));
     setShowChallengeForm(true);
   };
@@ -536,8 +585,9 @@ export default function ChallengeTrackerPage() {
                   </div>
                   <h1 className="font-display text-3xl font-black leading-tight md:text-5xl">Choose an active challenge</h1>
                 </div>
-                <button type="button" onClick={startNewChallenge} className="rounded-full bg-white px-5 py-3 font-black text-slate-900 shadow-lg transition hover:-translate-y-0.5">Create new challenge</button>
+                <button type="button" onClick={startNewChallenge} disabled={householdMembersLoading || !!householdMembersError || !householdMembers.length} className="rounded-full bg-white px-5 py-3 font-black text-slate-900 shadow-lg transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60">Create new challenge</button>
               </div>
+              {householdMembersError && <p role="alert" className="mt-4 text-sm text-red-100">Could not load household members. Refresh the page to try again.</p>}
             </section>
 
             <section className="space-y-6">
@@ -550,7 +600,7 @@ export default function ChallengeTrackerPage() {
                     <div className="rounded-3xl bg-white p-8 text-center shadow-lg md:col-span-2 xl:col-span-3">
                       <p className="mb-3 text-xl font-black text-slate-900">No ongoing challenges</p>
                       <p className="mb-6 text-slate-500">Create your first challenge and invite teammates by email to share progress.</p>
-                      <button type="button" onClick={startNewChallenge} className="rounded-2xl bg-slate-900 px-5 py-3 font-black text-white">Create challenge</button>
+                      <button type="button" onClick={startNewChallenge} disabled={householdMembersLoading || !!householdMembersError || !householdMembers.length} className="rounded-2xl bg-slate-900 px-5 py-3 font-black text-white disabled:cursor-not-allowed disabled:opacity-60">Create challenge</button>
                     </div>
                   ) : (
                     challengeList.active.map((challengeItem) => (
@@ -672,7 +722,7 @@ export default function ChallengeTrackerPage() {
               <div className="rounded-3xl bg-white p-5 text-slate-900 shadow-xl">
                 <div className="flex items-center justify-between"><span className="text-sm font-semibold text-slate-500">Current leader</span><Trophy className="h-7 w-7 text-amber-500" /></div>
                 <h2 className="mt-3 text-3xl font-black">{leader.name}</h2>
-                <p className="text-slate-500">Ahead by {Math.abs(leader.total - runnerUp.total)} points</p>
+                <p className="text-slate-500">{runnerUp ? `Ahead by ${Math.abs(leader.total - runnerUp.total)} points` : 'Only participant'}</p>
                 <ProgressBar value={leader.total} max={maxChallengePoints} gradient={leader.color} />
                 <p className="mt-3 text-sm font-semibold text-slate-600">{leader.total} / {maxChallengePoints} scored habit points</p>
               </div>
@@ -745,27 +795,44 @@ export default function ChallengeTrackerPage() {
             </div>
             <div className="mb-2">
               <h3 className="text-lg font-black">2. Participant goals</h3>
-              <p className="text-sm text-slate-500">Set a target for each participant on tasks that use a goal-based scoring rule.</p>
+              <p className="text-sm text-slate-500">Choose participants from your household. Names and emails come from their accounts and cannot be edited here.</p>
             </div>
+            {householdMembersError && <p role="alert" className="mb-3 text-sm text-red-600">Could not load household members. Refresh the page to continue.</p>}
+            {!draftParticipants.length && <p className="mb-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">Add at least one household member to this challenge.</p>}
+            {draftParticipants.length < householdMembers.length && (
+              <button type="button" onClick={addDraftParticipant} className="mb-4 rounded-xl bg-sky-100 px-4 py-2 font-bold text-sky-800">+ Add participant</button>
+            )}
             <div className="grid gap-4 md:grid-cols-2">
-              {draftParticipants.map((participant) => (
+              {draftParticipants.map((participant, participantIndex) => (
                 <div key={participant.id} className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
-                  <label className="mb-4 block">
-                      <span className="mb-2 block text-sm font-bold text-slate-600">Participant name</span>
-                      <input
-                        value={participant.name}
-                        onChange={(event) => updateDraftParticipant(participant.id, 'name', event.target.value)}
-                        className={`w-full rounded-xl border border-slate-200 px-3 py-2 text-2xl font-black ${participant.text}`}
-                      />
-                      <span className="mb-2 mt-3 block text-sm font-bold text-slate-600">Participant email (optional — used for sharing)</span>
-                      <input
-                        type="email"
-                        value={participant.email || ''}
-                        onChange={(event) => updateDraftParticipant(participant.id, 'email', event.target.value)}
-                        placeholder="name@example.com"
-                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold"
-                      />
+                  <div className="mb-4 flex items-start gap-3">
+                    <label className="block min-w-0 flex-1">
+                      <span className="mb-2 block text-sm font-bold text-slate-600">Participant</span>
+                      <select
+                        value={participant.email}
+                        onChange={(event) => updateDraftParticipant(participantIndex, event.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-semibold"
+                      >
+                        {!householdMembers.some((member) => member.email.toLowerCase() === participant.email.toLowerCase()) && (
+                          <option value={participant.email} disabled>{participant.name} ({participant.email}) — not in this household</option>
+                        )}
+                        {householdMembers.map((member) => {
+                          const alreadySelected = draftParticipants.some((selected, index) => (
+                            index !== participantIndex && selected.email.toLowerCase() === member.email.toLowerCase()
+                          ));
+                          return (
+                            <option key={member.id} value={member.email.toLowerCase()} disabled={alreadySelected}>
+                              {member.name} ({member.email})
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <span className="mt-2 block truncate text-sm text-slate-600">{participant.name} · {participant.email}</span>
                     </label>
+                    {draftParticipants.length > 1 && (
+                      <button type="button" onClick={() => removeDraftParticipant(participant.id)} className="mt-7 shrink-0 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50">Remove</button>
+                    )}
+                  </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                       {draftMetrics.filter((metric) => metric.inputType === 'number' && metric.scoringType !== 'none').map((metric) => (
                         <label key={metric.key} className="block rounded-2xl bg-white p-3 shadow-sm">
@@ -784,7 +851,7 @@ export default function ChallengeTrackerPage() {
                 </div>
               ))}
             </div>
-          <div className="mt-5 flex flex-wrap gap-3"><button type="button" onClick={saveChallenge} className="rounded-2xl bg-slate-900 px-5 py-3 font-black text-white">Save challenge</button><button type="button" onClick={() => setShowChallengeForm(false)} className="rounded-2xl border border-slate-200 px-5 py-3 font-black text-slate-700">Cancel</button></div>
+          <div className="mt-5 flex flex-wrap gap-3"><button type="button" onClick={saveChallenge} disabled={!draftParticipants.length || householdMembersLoading || !!householdMembersError} className="rounded-2xl bg-slate-900 px-5 py-3 font-black text-white disabled:cursor-not-allowed disabled:opacity-60">Save challenge</button><button type="button" onClick={() => setShowChallengeForm(false)} className="rounded-2xl border border-slate-200 px-5 py-3 font-black text-slate-700">Cancel</button></div>
           </section>
           )}
 
