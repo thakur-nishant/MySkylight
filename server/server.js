@@ -124,6 +124,37 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
   res.json(req.user);
 });
 
+app.patch('/api/auth/password', authMiddleware, (req, res) => {
+  const { currentPassword, newPassword, confirmPassword } = req.body ?? {};
+  if (
+    typeof currentPassword !== 'string' ||
+    typeof newPassword !== 'string' ||
+    typeof confirmPassword !== 'string' ||
+    !currentPassword ||
+    !newPassword ||
+    !confirmPassword
+  ) {
+    return res.status(400).json({ error: 'Complete all password fields' });
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: 'New password must be at least 8 characters' });
+  }
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({ error: 'New passwords do not match' });
+  }
+
+  const user = db.prepare('SELECT password_hash as passwordHash FROM users WHERE id = ?').get(req.user.id);
+  if (!user || !verifyPassword(currentPassword, user.passwordHash)) {
+    return res.status(400).json({ error: 'Current password is incorrect' });
+  }
+
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(
+    hashPassword(newPassword),
+    req.user.id,
+  );
+  res.json({ success: true });
+});
+
 app.patch('/api/auth/profile', authMiddleware, (req, res) => {
   const { name, color, avatar } = req.body ?? {};
   const updates = {};

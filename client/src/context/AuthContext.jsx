@@ -51,6 +51,8 @@ export function AuthProvider({ children }) {
     return updatedUser;
   };
 
+  const changePassword = async (data) => authApi.changePassword(data);
+
   const logout = () => {
     localStorage.removeItem('token');
     setUser(null);
@@ -65,6 +67,7 @@ export function AuthProvider({ children }) {
         login,
         register,
         updateProfile,
+        changePassword,
         logout,
       }}
     >
