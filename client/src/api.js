@@ -32,6 +32,7 @@ export const auth = {
   register: (data) => api('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
   me: () => api('/auth/me'),
   updateProfile: (data) => api('/auth/profile', { method: 'PATCH', body: JSON.stringify(data) }),
+  changePassword: (data) => api('/auth/password', { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
 export const users = {
