@@ -68,7 +68,12 @@ db.pragma('foreign_keys = ON');
 function saveDb() {
   const data = rawDb.export();
   const buffer = Buffer.from(data);
-  fs.writeFileSync(dbPath, buffer);
+  fs.writeFileSync(dbPath, buffer, { mode: 0o600 });
+  try {
+    fs.chmodSync(dbPath, 0o600);
+  } catch {
+    /* best effort on filesystems that do not support chmod */
+  }
 }
 
 // Initialize schema
@@ -336,9 +341,15 @@ for (const household of householdsWithoutHead) {
 
 saveDb();
 
-// Seed default data if empty
+// Seed default data only in development unless explicitly requested.
+// Production deployments should start empty and create a real household.
 const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get();
-if (userCount.count === 0) {
+const shouldSeedDemo =
+  userCount.count === 0 &&
+  (process.env.SEED_DEMO === 'true' ||
+    (process.env.SEED_DEMO !== 'false' && process.env.NODE_ENV !== 'production'));
+
+if (shouldSeedDemo) {
   const bcrypt = (await import('bcryptjs')).default;
   const hash = bcrypt.hashSync('demo123', 10);
 

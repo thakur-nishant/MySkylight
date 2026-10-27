@@ -1,0 +1,24 @@
+[Unit]
+Description=MySkylight
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=myskylight
+Group=myskylight
+WorkingDirectory=/opt/myskylight/app/server
+EnvironmentFile=/etc/myskylight.env
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+
+# The SQLite file lives in the server directory and is the only writable path.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/myskylight/app/server
+
+[Install]
+WantedBy=multi-user.target

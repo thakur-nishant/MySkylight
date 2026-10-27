@@ -1,3 +1,13 @@
 client/node_modules/
 node_modules/
 server/node_modules/
+
+# Runtime data and build output
+server/myskylight.db
+server/*.db-journal
+dev.log
+client/dist/
+
+# Local environment and OS files
+.env
+.DS_Store
