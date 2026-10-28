@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
+import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'url';
 import db from './database.js';
 import { hashPassword, verifyPassword, createToken, authMiddleware } from './auth.js';
@@ -26,8 +27,8 @@ const GOOGLE_ENABLED = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLI
 const WORKFLOW_STATUSES = new Set(['backlog', 'todo', 'in_progress', 'done']);
 const VALID_TASK_TYPES = new Set(['daily', 'weekly', 'monthly', 'one-time', 'event']);
 
-const DEFAULT_MEMBER_PASSWORD = process.env.DEFAULT_MEMBER_PASSWORD || 'Test@123';
-const ALLOW_REGISTRATION = process.env.ALLOW_REGISTRATION !== 'false';
+const ALLOW_REGISTRATION = process.env.ALLOW_REGISTRATION === 'true'
+  || (process.env.NODE_ENV !== 'production' && process.env.ALLOW_REGISTRATION !== 'false');
 
 const USER_WITH_HOUSEHOLD_SELECT = `
   SELECT u.id, u.name, u.email, u.color, u.avatar, u.household_id, u.role, h.name as household_name
@@ -48,11 +49,48 @@ function toPublicUser(user) {
   };
 }
 
+function usersBelongToHousehold(userIds, householdId) {
+  if (!Array.isArray(userIds)) return false;
+  const ids = [...new Set(userIds.map(Number))];
+  if (ids.length !== userIds.length || ids.some((id) => !Number.isSafeInteger(id) || id <= 0)) return false;
+  if (!ids.length) return true;
+  const placeholders = ids.map(() => '?').join(', ');
+  const result = db.prepare(`
+    SELECT COUNT(*) as count FROM users
+    WHERE household_id = ? AND id IN (${placeholders})
+  `).get(householdId, ...ids);
+  return result.count === ids.length;
+}
+
+function projectBelongsToHousehold(projectId, householdId) {
+  if (projectId === undefined || projectId === null || projectId === '') return true;
+  const id = Number(projectId);
+  if (!Number.isSafeInteger(id) || id <= 0) return false;
+  return !!db.prepare('SELECT 1 FROM projects WHERE id = ? AND household_id = ?').get(id, householdId);
+}
+
+function challengeParticipantsBelongToHousehold(participants, householdId) {
+  if (!Array.isArray(participants) || participants.length === 0) return false;
+  const emails = participants.map((participant) => {
+    const email = String(participant?.email || '').trim().toLowerCase();
+    const id = String(participant?.id || '').trim().toLowerCase();
+    return email && id === email ? email : null;
+  });
+  if (emails.some((email) => !email) || new Set(emails).size !== emails.length) return false;
+  const placeholders = emails.map(() => '?').join(', ');
+  const result = db.prepare(`
+    SELECT COUNT(*) as count FROM users
+    WHERE household_id = ? AND LOWER(email) IN (${placeholders})
+  `).get(householdId, ...emails);
+  return result.count === emails.length;
+}
+
 // Auth routes
 app.post('/api/auth/register', (req, res) => {
-  if (!ALLOW_REGISTRATION) {
+  const existingUser = db.prepare('SELECT 1 FROM users LIMIT 1').get();
+  if (!ALLOW_REGISTRATION || existingUser) {
     return res.status(403).json({
-      error: 'Registration is disabled. Ask the head of your household for an invite.',
+      error: 'Household registration is closed. Ask the head of your household for an invite.',
     });
   }
 
@@ -64,11 +102,6 @@ app.post('/api/auth/register', (req, res) => {
 
     if (!trimmedName || !trimmedEmail || !password || !trimmedHouseholdName) {
       return res.status(400).json({ error: 'Name, email, password, and household name required' });
-    }
-
-    const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(trimmedEmail);
-    if (existingUser) {
-      return res.status(400).json({ error: 'Email already registered' });
     }
 
     const password_hash = hashPassword(password);
@@ -90,6 +123,9 @@ app.post('/api/auth/register', (req, res) => {
     db.prepare('UPDATE households SET head_user_id = ? WHERE id = ?').run(result.lastInsertRowid, householdId);
 
     const user = db.prepare(`${USER_WITH_HOUSEHOLD_SELECT} WHERE u.id = ?`).get(result.lastInsertRowid);
+    db.prepare('UPDATE projects SET household_id = ? WHERE household_id IS NULL').run(householdId);
+    db.prepare('UPDATE tasks SET household_id = ? WHERE household_id IS NULL').run(householdId);
+    db.prepare('UPDATE challenges SET household_id = ? WHERE household_id IS NULL').run(householdId);
     res.json({ user: toPublicUser(user), token: createToken(user) });
   } catch (err) {
     if (err.message?.includes('UNIQUE constraint failed') || err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -250,6 +286,7 @@ app.post('/api/household/invite', authMiddleware, (req, res) => {
     return res.status(400).json({ error: 'Email already registered' });
   }
 
+  const temporaryPassword = randomBytes(24).toString('base64url');
   try {
     const result = db.prepare(`
       INSERT INTO users (name, email, password_hash, color, household_id, role)
@@ -257,7 +294,7 @@ app.post('/api/household/invite', authMiddleware, (req, res) => {
     `).run(
       name.trim(),
       email.trim(),
-      hashPassword(DEFAULT_MEMBER_PASSWORD),
+      hashPassword(temporaryPassword),
       color || '#6366f1',
       req.user.household_id
     );
@@ -265,7 +302,7 @@ app.post('/api/household/invite', authMiddleware, (req, res) => {
     const user = db.prepare(`${USER_WITH_HOUSEHOLD_SELECT} WHERE u.id = ?`).get(result.lastInsertRowid);
     res.status(201).json({
       user: toPublicUser(user),
-      temporaryPassword: DEFAULT_MEMBER_PASSWORD,
+      temporaryPassword,
     });
   } catch (err) {
     if (err.message?.includes('UNIQUE constraint failed') || err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -281,12 +318,12 @@ app.get('/api/projects', authMiddleware, (req, res) => {
 
   const projects = db.prepare(`
     SELECT p.*, u.name as created_by_name,
-      (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_personal = 0) as task_count
+      (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.household_id = p.household_id AND t.is_personal = 0) as task_count
     FROM projects p
     LEFT JOIN users u ON u.id = p.created_by
-    WHERE (? = 1 OR p.is_archived = 0)
+    WHERE p.household_id = ? AND (? = 1 OR p.is_archived = 0)
     ORDER BY p.is_archived ASC, p.created_at DESC
-  `).all(includeArchived ? 1 : 0);
+  `).all(req.user.household_id, includeArchived ? 1 : 0);
 
   res.json(projects.map((project) => ({
     ...project,
@@ -299,9 +336,9 @@ app.post('/api/projects', authMiddleware, (req, res) => {
   if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
 
   const result = db.prepare(`
-    INSERT INTO projects (name, description, created_by)
-    VALUES (?, ?, ?)
-  `).run(name.trim(), description?.trim() || null, req.user.id);
+    INSERT INTO projects (household_id, name, description, created_by)
+    VALUES (?, ?, ?, ?)
+  `).run(req.user.household_id, name.trim(), description?.trim() || null, req.user.id);
 
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(result.lastInsertRowid);
   res.status(201).json({ ...project, is_archived: !!project.is_archived });
@@ -309,40 +346,40 @@ app.post('/api/projects', authMiddleware, (req, res) => {
 
 app.patch('/api/projects/:id/archive', authMiddleware, (req, res) => {
   const { id } = req.params;
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+  const project = db.prepare('SELECT * FROM projects WHERE id = ? AND household_id = ?').get(id, req.user.household_id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
 
   db.prepare(`
     UPDATE projects
     SET is_archived = 1, archived_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(id);
+    WHERE id = ? AND household_id = ?
+  `).run(id, req.user.household_id);
 
-  const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+  const updated = db.prepare('SELECT * FROM projects WHERE id = ? AND household_id = ?').get(id, req.user.household_id);
   res.json({ ...updated, is_archived: !!updated.is_archived });
 });
 
 app.patch('/api/projects/:id/restore', authMiddleware, (req, res) => {
   const { id } = req.params;
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+  const project = db.prepare('SELECT * FROM projects WHERE id = ? AND household_id = ?').get(id, req.user.household_id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
 
   db.prepare(`
     UPDATE projects
     SET is_archived = 0, archived_at = NULL
-    WHERE id = ?
-  `).run(id);
+    WHERE id = ? AND household_id = ?
+  `).run(id, req.user.household_id);
 
-  const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+  const updated = db.prepare('SELECT * FROM projects WHERE id = ? AND household_id = ?').get(id, req.user.household_id);
   res.json({ ...updated, is_archived: !!updated.is_archived });
 });
 
 app.delete('/api/projects/:id', authMiddleware, (req, res) => {
   const { id } = req.params;
-  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(id);
+  const project = db.prepare('SELECT id FROM projects WHERE id = ? AND household_id = ?').get(id, req.user.household_id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
 
-  db.prepare('DELETE FROM projects WHERE id = ?').run(id);
+  db.prepare('DELETE FROM projects WHERE id = ? AND household_id = ?').run(id, req.user.household_id);
   res.status(204).send();
 });
 
@@ -350,13 +387,15 @@ app.delete('/api/projects/:id', authMiddleware, (req, res) => {
 app.get('/api/tasks', authMiddleware, (req, res) => {
   const { type, assigned_to, project_id } = req.query;
 
-  const params = [];
+  const params = [req.user.household_id];
   let sql = `
     SELECT t.*, p.name as project_name,
-      (SELECT json_group_array(user_id) FROM task_assignments WHERE task_id = t.id) as assigned_user_ids
+      (SELECT json_group_array(ta.user_id) FROM task_assignments ta
+       JOIN users assigned_user ON assigned_user.id = ta.user_id
+       WHERE ta.task_id = t.id AND assigned_user.household_id = t.household_id) as assigned_user_ids
     FROM tasks t
-    LEFT JOIN projects p ON p.id = t.project_id
-    WHERE t.is_personal = 0
+    LEFT JOIN projects p ON p.id = t.project_id AND p.household_id = t.household_id
+    WHERE t.is_personal = 0 AND t.household_id = ?
   `;
 
   if (type && VALID_TASK_TYPES.has(type)) {
@@ -418,11 +457,18 @@ app.post('/api/tasks', authMiddleware, (req, res) => {
   if (!title?.trim()) return res.status(400).json({ error: 'title is required' });
   if (!VALID_TASK_TYPES.has(normalizedTaskType)) return res.status(400).json({ error: 'invalid task_type' });
   if (!WORKFLOW_STATUSES.has(normalizedWorkflowStatus)) return res.status(400).json({ error: 'invalid workflow_status' });
+  if (assigned_user_ids !== undefined && !usersBelongToHousehold(assigned_user_ids, req.user.household_id)) {
+    return res.status(400).json({ error: 'assigned_user_ids must contain only household members' });
+  }
+  if (!projectBelongsToHousehold(project_id, req.user.household_id)) {
+    return res.status(400).json({ error: 'project_id must belong to your household' });
+  }
 
   const result = db.prepare(`
-    INSERT INTO tasks (title, description, task_type, recurrence_pattern, default_stars, is_group_task, group_id, due_date, start_time, end_time, is_all_day, is_personal, created_by, project_id, workflow_status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO tasks (household_id, title, description, task_type, recurrence_pattern, default_stars, is_group_task, group_id, due_date, start_time, end_time, is_all_day, is_personal, created_by, project_id, workflow_status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
+    req.user.household_id,
     title,
     description || null,
     normalizedTaskType,
@@ -450,9 +496,12 @@ app.post('/api/tasks', authMiddleware, (req, res) => {
   }
 
   const task = db.prepare(`
-    SELECT t.*, p.name as project_name, (SELECT json_group_array(user_id) FROM task_assignments WHERE task_id = t.id) as assigned_user_ids
+    SELECT t.*, p.name as project_name,
+      (SELECT json_group_array(ta.user_id) FROM task_assignments ta
+       JOIN users assigned_user ON assigned_user.id = ta.user_id
+       WHERE ta.task_id = t.id AND assigned_user.household_id = t.household_id) as assigned_user_ids
     FROM tasks t
-    LEFT JOIN projects p ON p.id = t.project_id
+    LEFT JOIN projects p ON p.id = t.project_id AND p.household_id = t.household_id
     WHERE t.id = ?
   `).get(taskId);
   task.assigned_user_ids = task.assigned_user_ids ? JSON.parse(task.assigned_user_ids) : [];
@@ -484,11 +533,18 @@ app.patch('/api/tasks/:id', authMiddleware, (req, res) => {
     workflow_status
   } = req.body;
 
-  const task = db.prepare('SELECT id, project_id FROM tasks WHERE id = ?').get(id);
+  const task = db.prepare('SELECT id, project_id FROM tasks WHERE id = ? AND household_id = ?').get(id, req.user.household_id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
 
   if (task_type && !VALID_TASK_TYPES.has(task_type)) return res.status(400).json({ error: 'invalid task_type' });
   if (workflow_status && !WORKFLOW_STATUSES.has(workflow_status)) return res.status(400).json({ error: 'invalid workflow_status' });
+  if (assigned_user_ids !== undefined && !usersBelongToHousehold(assigned_user_ids, req.user.household_id)) {
+    return res.status(400).json({ error: 'assigned_user_ids must contain only household members' });
+  }
+  const nextProjectId = project_id === undefined ? task.project_id : project_id;
+  if (!projectBelongsToHousehold(nextProjectId, req.user.household_id)) {
+    return res.status(400).json({ error: 'project_id must belong to your household' });
+  }
 
   const safe = (v) => (v === undefined ? null : v);
 
@@ -508,7 +564,7 @@ app.patch('/api/tasks/:id', authMiddleware, (req, res) => {
       is_personal = COALESCE(?, is_personal),
       project_id = ?,
       workflow_status = COALESCE(?, workflow_status)
-    WHERE id = ?
+    WHERE id = ? AND household_id = ?
   `).run(
     safe(title),
     safe(description),
@@ -522,9 +578,10 @@ app.patch('/api/tasks/:id', authMiddleware, (req, res) => {
     safe(end_time),
     is_all_day !== undefined ? (is_all_day ? 1 : 0) : null,
     is_personal !== undefined ? (is_personal ? 1 : 0) : null,
-    project_id === undefined ? task.project_id : project_id,
+    nextProjectId || null,
     safe(workflow_status),
-    id
+    id,
+    req.user.household_id
   );
 
   if (assigned_user_ids !== undefined) {
@@ -542,7 +599,7 @@ app.patch('/api/tasks/:id', authMiddleware, (req, res) => {
 
 
 app.delete('/api/tasks/:id', authMiddleware, (req, res) => {
-  db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
+  db.prepare('DELETE FROM tasks WHERE id = ? AND household_id = ?').run(req.params.id, req.user.household_id);
   res.status(204).send();
 });
 
@@ -554,9 +611,10 @@ app.get('/api/completions', authMiddleware, (req, res) => {
     FROM task_completions tc
     JOIN tasks t ON t.id = tc.task_id
     LEFT JOIN users u ON u.id = tc.user_id
-    WHERE t.is_personal = 0
+    WHERE t.is_personal = 0 AND t.household_id = ?
+      AND (tc.user_id IS NULL OR u.household_id = ?)
   `;
-  const params = [];
+  const params = [req.user.household_id, req.user.household_id];
   if (task_id) { sql += ' AND tc.task_id = ?'; params.push(task_id); }
   if (user_id) { sql += ' AND tc.user_id = ?'; params.push(user_id); }
   if (start_date) { sql += ' AND datetime(tc.completed_at) >= datetime(?)'; params.push(start_date); }
@@ -573,7 +631,10 @@ app.post('/api/completions', authMiddleware, (req, res) => {
 
   if (!task_id) return res.status(400).json({ error: 'task_id is required' });
 
-  const task = db.prepare('SELECT id, default_stars FROM tasks WHERE id = ?').get(task_id);
+  const task = db.prepare(`
+    SELECT id, default_stars FROM tasks
+    WHERE id = ? AND household_id = ? AND is_personal = 0
+  `).get(task_id, req.user.household_id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
 
   // Normalize to array of user IDs
@@ -590,6 +651,9 @@ app.post('/api/completions', authMiddleware, (req, res) => {
   idsToComplete = idsToComplete.filter((id) => id != null);
   if (idsToComplete.length === 0) {
     return res.status(400).json({ error: 'No valid user IDs provided' });
+  }
+  if (!usersBelongToHousehold(idsToComplete, req.user.household_id)) {
+    return res.status(400).json({ error: 'user_ids must contain only household members' });
   }
 
   const starsToUse = stars_earned ?? task.default_stars;
@@ -617,7 +681,14 @@ app.post('/api/completions', authMiddleware, (req, res) => {
 
 // Delete task completed OR Mark Undone
 app.delete('/api/completions/:id', authMiddleware, (req, res) => {
-  db.prepare('DELETE FROM task_completions WHERE id = ?').run(req.params.id);
+  db.prepare(`
+    DELETE FROM task_completions
+    WHERE id = ? AND task_id IN (
+      SELECT id FROM tasks WHERE household_id = ?
+    ) AND (user_id IS NULL OR user_id IN (
+      SELECT id FROM users WHERE household_id = ?
+    ))
+  `).run(req.params.id, req.user.household_id, req.user.household_id);
   res.status(204).send();
 });
 
@@ -742,8 +813,8 @@ app.post('/api/integrations/google/import', authMiddleware, async (req, res) => 
 
     const created = [];
     const insertTask = db.prepare(`
-      INSERT INTO tasks (title, description, task_type, recurrence_pattern, default_stars, is_group_task, group_id, due_date, start_time, end_time, is_all_day, is_personal, created_by, project_id, workflow_status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (household_id, title, description, task_type, recurrence_pattern, default_stars, is_group_task, group_id, due_date, start_time, end_time, is_all_day, is_personal, created_by, project_id, workflow_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const insertMap = db.prepare('INSERT OR REPLACE INTO google_imports (gcal_id, task_id, imported_at) VALUES (?, ?, ?)');
@@ -765,6 +836,7 @@ app.post('/api/integrations/google/import', authMiddleware, async (req, res) => 
       if (!allDay && it.end?.dateTime) endTime = new Date(it.end.dateTime).toISOString().slice(11,16);
 
       const result = insertTask.run(
+        req.user.household_id,
         it.summary || '(no title)',
         it.description || null,
         'event',
@@ -925,9 +997,9 @@ app.post('/api/tracker/tasks', authMiddleware, (req, res) => {
   if (!title || !due_date) return res.status(400).json({ error: 'title and due_date are required' });
 
   const result = db.prepare(`
-    INSERT INTO tasks (title, task_type, recurrence_pattern, due_date, created_by, is_all_day, is_personal)
-    VALUES (?, 'one-time', 'personal_tracker', ?, ?, 1, 1)
-  `).run(title, due_date, req.user.id);
+    INSERT INTO tasks (household_id, title, task_type, recurrence_pattern, due_date, created_by, is_all_day, is_personal)
+    VALUES (?, ?, 'one-time', 'personal_tracker', ?, ?, 1, 1)
+  `).run(req.user.household_id, title, due_date, req.user.id);
 
   const task = db.prepare('SELECT id, title, due_date FROM tasks WHERE id = ?').get(result.lastInsertRowid);
   res.status(201).json(task);
@@ -1064,6 +1136,9 @@ app.patch('/api/completions', authMiddleware, (req, res) => {
   if (!Array.isArray(updates)) updates = [updates];
 
   if (!task_id) return res.status(400).json({ error: 'task_id is required' });
+  const task = db.prepare('SELECT id FROM tasks WHERE id = ? AND household_id = ? AND is_personal = 0')
+    .get(task_id, req.user.household_id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
 
   const updatedCompletions = [];
 
@@ -1072,27 +1147,29 @@ app.patch('/api/completions', authMiddleware, (req, res) => {
     FROM task_completions tc
     JOIN tasks t ON t.id = tc.task_id
     LEFT JOIN users u ON u.id = tc.user_id
-    WHERE tc.id = ?
+    WHERE tc.id = ? AND tc.task_id = ? AND t.household_id = ?
+      AND (tc.user_id IS NULL OR u.household_id = ?)
   `);
 
   const updateStmt = db.prepare(`
     UPDATE task_completions
     SET stars_earned = COALESCE(?, stars_earned),
         notes = COALESCE(?, notes)
-    WHERE id = ?
+    WHERE id = ? AND task_id = ?
   `);
 
   for (const upd of updates) {
-    const existing = selectStmt.get(upd.id);
+    const existing = selectStmt.get(upd.id, task.id, req.user.household_id, req.user.household_id);
     if (!existing) continue;
 
     updateStmt.run(
       upd.stars_earned ?? null,
       upd.notes ?? null,
-      upd.id
+      upd.id,
+      task.id
     );
 
-    const updated = selectStmt.get(upd.id);
+    const updated = selectStmt.get(upd.id, task.id, req.user.household_id, req.user.household_id);
     updatedCompletions.push(updated);
   }
 
@@ -1102,8 +1179,9 @@ app.patch('/api/completions', authMiddleware, (req, res) => {
     FROM task_completions tc
     JOIN tasks t ON t.id = tc.task_id
     LEFT JOIN users u ON u.id = tc.user_id
-    WHERE tc.task_id = ?
-  `).all(task_id);
+    WHERE tc.task_id = ? AND t.household_id = ?
+      AND (tc.user_id IS NULL OR u.household_id = ?)
+  `).all(task.id, req.user.household_id, req.user.household_id);
 
   res.json(finalCompletions);
 });
@@ -1111,11 +1189,11 @@ app.patch('/api/completions', authMiddleware, (req, res) => {
 
 
 
-function loadChallengeTrackerState(userId, userEmail, challengeIdOverride) {
+function loadChallengeTrackerState(userId, userEmail, householdId, challengeIdOverride) {
   const normalizedEmail = (userEmail || '').trim().toLowerCase();
   let challenge;
 
-  const selectedChallengeId = challengeIdOverride || pickBestChallengeId(userId, userEmail);
+  const selectedChallengeId = challengeIdOverride || pickBestChallengeId(userId, userEmail, householdId);
 
   if (selectedChallengeId) {
     challenge = db.prepare(`
@@ -1123,6 +1201,7 @@ function loadChallengeTrackerState(userId, userEmail, challengeIdOverride) {
         c.metrics_json as metricsJson
       FROM challenges c
       WHERE c.id = ?
+        AND c.household_id = ?
         AND (
           c.created_by = ? OR EXISTS (
             SELECT 1 FROM challenge_participants cp
@@ -1130,25 +1209,29 @@ function loadChallengeTrackerState(userId, userEmail, challengeIdOverride) {
           )
         )
       LIMIT 1
-    `).get(selectedChallengeId, userId, normalizedEmail);
+    `).get(selectedChallengeId, householdId, userId, normalizedEmail);
   }
 
   if (!challenge) return null;
 
   const participants = db.prepare(`
-    SELECT participant_key as id, participant_key as email, name, color, text_class as text
-    FROM challenge_participants
-    WHERE challenge_id = ?
+    SELECT cp.participant_key as id, cp.participant_key as email, cp.name, cp.color, cp.text_class as text
+    FROM challenge_participants cp
+    JOIN users u ON LOWER(u.email) = LOWER(cp.participant_key) AND u.household_id = ?
+    WHERE cp.challenge_id = ?
     ORDER BY display_order, participant_key
-  `).all(challenge.id);
+  `).all(householdId, challenge.id);
 
   const goalRows = db.prepare(`
     SELECT participant_key as participantKey, max_calories as maxCalories, workout_minutes as workoutMinutes,
       min_steps as minSteps, protein_grams as proteinGrams, water_liters as waterLiters,
       custom_goals_json as customGoalsJson
-    FROM challenge_goals
-    WHERE challenge_id = ?
-  `).all(challenge.id);
+    FROM challenge_goals cg
+    WHERE cg.challenge_id = ? AND EXISTS (
+      SELECT 1 FROM users u
+      WHERE u.household_id = ? AND LOWER(u.email) = LOWER(cg.participant_key)
+    )
+  `).all(challenge.id, householdId);
 
   const goals = {};
   for (const row of goalRows) {
@@ -1166,9 +1249,12 @@ function loadChallengeTrackerState(userId, userEmail, challengeIdOverride) {
     SELECT entry_date as entryDate, participant_key as participantKey, calories, workout_minutes as workoutMinutes,
       steps, protein_grams as proteinGrams, water_liters as waterLiters, healthy_bonus as healthyBonus, sleep_hours as sleepHours,
       custom_values_json as customValuesJson
-    FROM challenge_daily_entries
-    WHERE challenge_id = ?
-  `).all(challenge.id);
+    FROM challenge_daily_entries cde
+    WHERE cde.challenge_id = ? AND EXISTS (
+      SELECT 1 FROM users u
+      WHERE u.household_id = ? AND LOWER(u.email) = LOWER(cde.participant_key)
+    )
+  `).all(challenge.id, householdId);
 
   const scores = {};
   for (const row of entryRows) {
@@ -1194,19 +1280,19 @@ function loadChallengeTrackerState(userId, userEmail, challengeIdOverride) {
   };
 }
 
-function findAccessibleChallengeIds(userId, userEmail) {
+function findAccessibleChallengeIds(userId, userEmail, householdId) {
   const normalizedEmail = (userEmail || '').trim().toLowerCase();
   return db.prepare(`
     SELECT DISTINCT c.id
     FROM challenges c
     LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
-    WHERE c.created_by = ? OR LOWER(cp.participant_key) = ?
+    WHERE c.household_id = ? AND (c.created_by = ? OR LOWER(cp.participant_key) = ?)
     ORDER BY c.id DESC
-  `).all(userId, normalizedEmail).map((row) => row.id);
+  `).all(householdId, userId, normalizedEmail).map((row) => row.id);
 }
 
-function pickBestChallengeId(userId, userEmail, preferredChallengeId = null) {
-  const ids = findAccessibleChallengeIds(userId, userEmail);
+function pickBestChallengeId(userId, userEmail, householdId, preferredChallengeId = null) {
+  const ids = findAccessibleChallengeIds(userId, userEmail, householdId);
   if (!ids.length) return null;
 
   if (preferredChallengeId && ids.includes(Number(preferredChallengeId))) {
@@ -1224,7 +1310,7 @@ function pickBestChallengeId(userId, userEmail, preferredChallengeId = null) {
   return candidates[0]?.id ?? null;
 }
 
-function saveChallengeConfig(userId, userEmail, { challenge, participants, goals, metrics, challengeId: explicitChallengeId }) {
+function saveChallengeConfig(userId, userEmail, householdId, { challenge, participants, goals, metrics, challengeId: explicitChallengeId }) {
   const metricsJson = Array.isArray(metrics) ? JSON.stringify(metrics) : null;
   const normalizedParticipants = (participants || []).map((participant, index) => {
     const rawId = participant?.id || participant?.email || `participant-${index + 1}`;
@@ -1255,22 +1341,22 @@ function saveChallengeConfig(userId, userEmail, { challenge, participants, goals
   }
 
   let challengeId = explicitChallengeId === undefined
-    ? pickBestChallengeId(userId, userEmail)
+    ? pickBestChallengeId(userId, userEmail, householdId)
     : (explicitChallengeId ? Number(explicitChallengeId) : null);
 
   if (challengeId) {
     db.prepare(`
       UPDATE challenges
       SET title = ?, start_date = ?, end_date = ?, publish_date = ?, metrics_json = COALESCE(?, metrics_json), updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(challenge.title, challenge.startDate, challenge.endDate, challenge.publishDate, metricsJson, challengeId);
+      WHERE id = ? AND household_id = ?
+    `).run(challenge.title, challenge.startDate, challenge.endDate, challenge.publishDate, metricsJson, challengeId, householdId);
     db.prepare('DELETE FROM challenge_participants WHERE challenge_id = ?').run(challengeId);
     db.prepare('DELETE FROM challenge_goals WHERE challenge_id = ?').run(challengeId);
   } else {
     const result = db.prepare(`
-      INSERT INTO challenges (title, start_date, end_date, publish_date, metrics_json, created_by)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(challenge.title, challenge.startDate, challenge.endDate, challenge.publishDate, metricsJson, userId);
+      INSERT INTO challenges (household_id, title, start_date, end_date, publish_date, metrics_json, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(householdId, challenge.title, challenge.startDate, challenge.endDate, challenge.publishDate, metricsJson, userId);
     challengeId = result.lastInsertRowid;
   }
 
@@ -1303,23 +1389,24 @@ function saveChallengeConfig(userId, userEmail, { challenge, participants, goals
   return challengeId;
 }
 
-function listChallengeTrackerChallenges(userId, userEmail) {
+function listChallengeTrackerChallenges(userId, userEmail, householdId) {
   const normalizedEmail = (userEmail || '').trim().toLowerCase();
   const challenges = db.prepare(`
     SELECT DISTINCT c.id, c.title, c.start_date as startDate, c.end_date as endDate, c.publish_date as publishDate
     FROM challenges c
     LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
-    WHERE c.created_by = ? OR LOWER(cp.participant_key) = ?
+    WHERE c.household_id = ? AND (c.created_by = ? OR LOWER(cp.participant_key) = ?)
     ORDER BY c.start_date DESC, c.id DESC
-  `).all(userId, normalizedEmail);
+  `).all(householdId, userId, normalizedEmail);
 
   const normalized = challenges.map((challenge) => {
     const participants = db.prepare(`
-      SELECT participant_key as id, participant_key as email, name, color, text_class as text
-      FROM challenge_participants
-      WHERE challenge_id = ?
-      ORDER BY display_order, participant_key
-    `).all(challenge.id);
+      SELECT cp.participant_key as id, cp.participant_key as email, cp.name, cp.color, cp.text_class as text
+      FROM challenge_participants cp
+      JOIN users u ON LOWER(u.email) = LOWER(cp.participant_key) AND u.household_id = ?
+      WHERE cp.challenge_id = ?
+      ORDER BY cp.display_order, cp.participant_key
+    `).all(householdId, challenge.id);
 
     return {
       ...challenge,
@@ -1346,13 +1433,13 @@ function listChallengeTrackerChallenges(userId, userEmail) {
 }
 
 app.get('/api/challenge-tracker', authMiddleware, (req, res) => {
-  const state = loadChallengeTrackerState(req.user.id, req.user.email);
+  const state = loadChallengeTrackerState(req.user.id, req.user.email, req.user.household_id);
   if (!state) return res.status(404).json({ error: 'No saved challenge' });
   res.json(state);
 });
 
 app.get('/api/challenge-tracker/list', authMiddleware, (req, res) => {
-  const challenges = listChallengeTrackerChallenges(req.user.id, req.user.email);
+  const challenges = listChallengeTrackerChallenges(req.user.id, req.user.email, req.user.household_id);
   res.json(challenges);
 });
 
@@ -1362,7 +1449,8 @@ app.delete('/api/challenge-tracker/:id', authMiddleware, (req, res) => {
     return res.status(400).json({ error: 'Invalid challenge id' });
   }
 
-  const challenge = db.prepare('SELECT id, created_by FROM challenges WHERE id = ?').get(challengeId);
+  const challenge = db.prepare('SELECT id, created_by FROM challenges WHERE id = ? AND household_id = ?')
+    .get(challengeId, req.user.household_id);
   if (!challenge) {
     return res.status(404).json({ error: 'Challenge not found' });
   }
@@ -1379,12 +1467,13 @@ app.delete('/api/challenge-tracker/:id', authMiddleware, (req, res) => {
     return res.status(403).json({ error: 'You do not have access to delete this challenge' });
   }
 
-  db.prepare('DELETE FROM challenges WHERE id = ?').run(challengeId);
+  db.prepare('DELETE FROM challenges WHERE id = ? AND household_id = ?')
+    .run(challengeId, req.user.household_id);
   res.status(204).send();
 });
 
 app.get('/api/challenge-tracker/:id', authMiddleware, (req, res) => {
-  const state = loadChallengeTrackerState(req.user.id, req.user.email, Number(req.params.id));
+  const state = loadChallengeTrackerState(req.user.id, req.user.email, req.user.household_id, Number(req.params.id));
   if (!state) return res.status(404).json({ error: 'Challenge not found' });
   res.json(state);
 });
@@ -1397,6 +1486,9 @@ app.put('/api/challenge-tracker', authMiddleware, (req, res) => {
   if (metrics !== undefined && !Array.isArray(metrics)) {
     return res.status(400).json({ error: 'metrics must be an array' });
   }
+  if (!challengeParticipantsBelongToHousehold(participants, req.user.household_id)) {
+    return res.status(400).json({ error: 'Challenge participants must be household members with matching account emails' });
+  }
   if (existingChallengeId !== undefined && existingChallengeId !== null) {
     const challengeId = Number(existingChallengeId);
     if (!Number.isSafeInteger(challengeId) || challengeId <= 0) {
@@ -1407,18 +1499,19 @@ app.put('/api/challenge-tracker', authMiddleware, (req, res) => {
       SELECT c.id
       FROM challenges c
       LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
-      WHERE c.id = ? AND (c.created_by = ? OR LOWER(cp.participant_key) = ?)
+      WHERE c.id = ? AND c.household_id = ?
+        AND (c.created_by = ? OR LOWER(cp.participant_key) = ?)
       LIMIT 1
-    `).get(challengeId, req.user.id, normalizedEmail);
+    `).get(challengeId, req.user.household_id, req.user.id, normalizedEmail);
     if (!authorizedChallenge) {
       return res.status(404).json({ error: 'Challenge not found or access denied' });
     }
   }
 
-  const challengeId = saveChallengeConfig(req.user.id, req.user.email, {
+  const challengeId = saveChallengeConfig(req.user.id, req.user.email, req.user.household_id, {
     challenge, participants, goals, metrics, challengeId: existingChallengeId,
   });
-  const state = loadChallengeTrackerState(req.user.id, req.user.email, challengeId);
+  const state = loadChallengeTrackerState(req.user.id, req.user.email, req.user.household_id, challengeId);
   res.json({ ...state, challengeId });
 });
 
@@ -1432,15 +1525,16 @@ app.put('/api/challenge-tracker/entries', authMiddleware, (req, res) => {
   const normalizedEmail = (req.user.email || '').trim().toLowerCase();
   const requestedChallengeId = selectedChallengeId ? Number(selectedChallengeId) : null;
 
-  let challengeId = requestedChallengeId || pickBestChallengeId(req.user.id, req.user.email);
+  let challengeId = requestedChallengeId || pickBestChallengeId(req.user.id, req.user.email, req.user.household_id);
   if (challengeId) {
     const challengeAccess = db.prepare(`
       SELECT c.id
       FROM challenges c
       LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
-      WHERE c.id = ? AND (c.created_by = ? OR LOWER(cp.participant_key) = ?)
+      WHERE c.id = ? AND c.household_id = ?
+        AND (c.created_by = ? OR LOWER(cp.participant_key) = ?)
       LIMIT 1
-    `).get(challengeId, req.user.id, normalizedEmail);
+    `).get(challengeId, req.user.household_id, req.user.id, normalizedEmail);
 
     if (!challengeAccess) {
       return res.status(404).json({ error: 'Challenge not found or access denied' });
@@ -1449,6 +1543,18 @@ app.put('/api/challenge-tracker/entries', authMiddleware, (req, res) => {
 
   if (!challengeId) {
     return res.status(404).json({ error: 'Save challenge settings before logging daily entries' });
+  }
+
+  const isChallengeParticipant = db.prepare(`
+    SELECT 1 FROM challenge_participants
+    WHERE challenge_id = ? AND LOWER(participant_key) = ?
+      AND EXISTS (
+        SELECT 1 FROM users
+        WHERE users.household_id = ? AND LOWER(users.email) = LOWER(challenge_participants.participant_key)
+      )
+  `).get(challengeId, normalizedParticipantId, req.user.household_id);
+  if (!isChallengeParticipant) {
+    return res.status(404).json({ error: 'Challenge participant not found' });
   }
 
   const existing = db.prepare(`
@@ -1518,7 +1624,7 @@ app.get('/api/insights/scores', authMiddleware, (req, res) => {
       COUNT(t.id) as completions_count
     FROM users u
     LEFT JOIN task_completions tc ON ${completionJoinFilters.join(' AND ')}
-    LEFT JOIN tasks t ON t.id = tc.task_id AND t.is_personal = 0
+    LEFT JOIN tasks t ON t.id = tc.task_id AND t.is_personal = 0 AND t.household_id = u.household_id
     WHERE u.household_id = ?
     GROUP BY u.id
     ORDER BY total_stars DESC
@@ -1534,14 +1640,13 @@ app.get('/api/insights/task-counts', authMiddleware, (req, res) => {
     FROM task_completions tc
     JOIN tasks t ON t.id = tc.task_id
     LEFT JOIN users u ON u.id = tc.user_id
-    WHERE t.is_personal = 0
+    WHERE t.is_personal = 0 AND t.household_id = ?
   `;
-  const params = [];
+  const params = [req.user.household_id];
   if (task_id) { sql += ' AND tc.task_id = ?'; params.push(task_id); }
   if (start_date) { sql += ' AND date(tc.completed_at) >= ?'; params.push(start_date); }
   if (end_date) { sql += ' AND date(tc.completed_at) <= ?'; params.push(end_date); }
-  sql += ' AND u.household_id = ?';
-  params.push(req.user.household_id);
+  sql += ' AND u.household_id = t.household_id';
   sql += ' GROUP BY tc.user_id, tc.task_id ORDER BY t.title, count DESC';
 
   const counts = db.prepare(sql).all(...params);
@@ -1550,37 +1655,36 @@ app.get('/api/insights/task-counts', authMiddleware, (req, res) => {
 
 app.get('/api/insights/overview', authMiddleware, (req, res) => {
   const { start_date, end_date } = req.query;
-  const params = [];
-  let dateFilter = '';
+  const params = [req.user.household_id];
+  const filters = ['t.household_id = ?', 't.is_personal = 0'];
   if (start_date && end_date) {
-    dateFilter = 'WHERE date(completed_at) BETWEEN ? AND ?';
+    filters.push('date(tc.completed_at) BETWEEN ? AND ?');
     params.push(start_date, end_date);
   } else if (start_date) {
-    dateFilter = 'WHERE date(completed_at) >= ?';
+    filters.push('date(tc.completed_at) >= ?');
     params.push(start_date);
   } else if (end_date) {
-    dateFilter = 'WHERE date(completed_at) <= ?';
+    filters.push('date(tc.completed_at) <= ?');
     params.push(end_date);
   }
-  const tcDateFilter = dateFilter.replace('date(completed_at)', 'date(tc.completed_at)');
-  const personalExclusion = tcDateFilter ? `${tcDateFilter} AND t.is_personal = 0` : 'WHERE t.is_personal = 0';
+  const householdFilter = `WHERE ${filters.join(' AND ')}`;
 
   const totalCompletions = db.prepare(`
     SELECT COUNT(tc.id) as total
     FROM task_completions tc
     JOIN tasks t ON t.id = tc.task_id
-    ${personalExclusion}
+    ${householdFilter}
   `).get(...params)?.total || 0;
   const totalStars = db.prepare(`
     SELECT COALESCE(SUM(tc.stars_earned), 0) as total
     FROM task_completions tc
     JOIN tasks t ON t.id = tc.task_id
-    ${personalExclusion}
+    ${householdFilter}
   `).get(...params)?.total || 0;
   const topTasks = db.prepare(`
     SELECT t.title, t.task_type, COUNT(tc.id) as completions
     FROM task_completions tc
-    JOIN tasks t ON t.id = tc.task_id ${personalExclusion}
+    JOIN tasks t ON t.id = tc.task_id ${householdFilter}
     GROUP BY tc.task_id
     ORDER BY completions DESC
     LIMIT 10
@@ -1598,9 +1702,9 @@ app.get('/api/calendar/events', authMiddleware, async (req, res) => {
   const tasks = db.prepare(`
     SELECT t.id, t.title, t.description, t.task_type, t.due_date, t.start_time, t.end_time, t.is_all_day, t.default_stars, t.project_id, p.name as project_name
     FROM tasks t
-    LEFT JOIN projects p ON p.id = t.project_id
-    WHERE is_personal = 0 AND due_date IS NOT NULL AND due_date >= ? AND due_date <= ?
-  `).all(rangeStart, rangeEnd);
+    LEFT JOIN projects p ON p.id = t.project_id AND p.household_id = t.household_id
+    WHERE t.household_id = ? AND t.is_personal = 0 AND t.due_date IS NOT NULL AND t.due_date >= ? AND t.due_date <= ?
+  `).all(req.user.household_id, rangeStart, rangeEnd);
 
   const events = tasks.map(t => ({
     id: `task-${t.id}`,

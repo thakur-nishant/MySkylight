@@ -92,14 +92,13 @@ PORT=3001
 JWT_SECRET=$(openssl rand -hex 32)
 SERVER_ORIGIN=https://myskylight.duckdns.org
 CORS_ORIGIN=https://myskylight.duckdns.org
-DEFAULT_MEMBER_PASSWORD=$(openssl rand -hex 12)
-ALLOW_REGISTRATION=true
+ALLOW_REGISTRATION=false
 EOF
 
 sudo chmod 600 /etc/myskylight.env
 ```
 
-Replace `myskylight.duckdns.org` with your actual hostname. Keep `ALLOW_REGISTRATION=true` only until you have created your household; see step 9.
+Replace `myskylight.duckdns.org` with your actual hostname. Registration stays disabled until you explicitly enable it for initial setup.
 
 If you use the Google Calendar integration, also set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and add this authorized redirect URI in Google Cloud:
 
@@ -161,20 +160,26 @@ sudo ufw status
 
 The Oracle VCN security list is separate from the host firewall; both must allow the traffic.
 
-## 9. Create your household and lock registration
+## 9. Create your household
 
-Open `https://yourname.duckdns.org` and use **Create household**. The registering email becomes the head of household.
+Temporarily enable registration, then restart the service:
 
-Once your household exists, disable public registration:
+```bash
+sudo sed -i 's/^ALLOW_REGISTRATION=.*/ALLOW_REGISTRATION=true/' /etc/myskylight.env
+sudo systemctl restart myskylight
+```
+
+Open `https://yourname.duckdns.org` and use **Create household**. The registering email becomes the head of household. Registration automatically closes after that first account is created. Explicitly disable registration again and restart the service:
 
 ```bash
 sudo sed -i 's/^ALLOW_REGISTRATION=.*/ALLOW_REGISTRATION=false/' /etc/myskylight.env
 sudo systemctl restart myskylight
 ```
 
-This matters because tasks, projects, and completions are still global app data rather than being scoped per household. Until that changes, run **one household per server**. Disabling registration prevents a stranger from creating a household and seeing your data.
+Projects, tasks, completions, insights, calendar events, and challenges are scoped to their household. Registration remains closed once an account exists, even if `ALLOW_REGISTRATION=true` is later set; household members should be added through the Household page.
 
 After that, the head of household can invite members from the **Household** page.
+If you previously deployed a version with a shared invitation password, have existing invited members change their passwords from their profiles.
 
 ## 10. Migrate the existing database
 
@@ -241,8 +246,7 @@ sudo systemctl restart myskylight
 ## 13. Production checklist
 
 - [ ] `JWT_SECRET` is set to a random value.
-- [ ] `DEFAULT_MEMBER_PASSWORD` is not the repository default.
-- [ ] `ALLOW_REGISTRATION=false` after your household exists.
+- [ ] `ALLOW_REGISTRATION=false` after your household exists (registration also closes automatically after the first account).
 - [ ] HTTPS works and HTTP redirects to HTTPS.
 - [ ] Oracle security list allows only 22 (your IP), 80, and 443.
 - [ ] SSH password login is disabled; use keys.
@@ -252,8 +256,8 @@ sudo systemctl restart myskylight
 
 ### Known gaps before opening this to untrusted users
 
-- **No password change/reset flow.** Invited members keep the shared temporary password. Use a strong `DEFAULT_MEMBER_PASSWORD` and only invite people you trust, or add a change-password flow first.
-- **Tasks/projects are global.** Use one household per server until they are scoped by `household_id`.
+- Invited members receive a unique randomly generated temporary password; they can change it from their profile.
+- Household-scoped records are isolated by the server; cross-household challenge participation is not supported.
 - **No login rate limiting.** Consider `express-rate-limit` or a Cloudflare proxy in front of the app.
 - **SQLite is single-process.** Do not scale horizontally or run a second copy against the same file.
 
