@@ -111,6 +111,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    household_id INTEGER REFERENCES households(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     description TEXT,
     task_type TEXT NOT NULL CHECK(task_type IN ('daily', 'weekly', 'monthly', 'one-time', 'event')),
@@ -131,6 +132,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    household_id INTEGER REFERENCES households(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     description TEXT,
     is_archived INTEGER NOT NULL DEFAULT 0,
@@ -184,6 +186,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS challenges (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    household_id INTEGER REFERENCES households(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
@@ -242,6 +245,9 @@ const challengeColumns = db.prepare('PRAGMA table_info(challenges)').all();
 if (!challengeColumns.some((column) => column.name === 'metrics_json')) {
   db.exec('ALTER TABLE challenges ADD COLUMN metrics_json TEXT');
 }
+if (!challengeColumns.some((column) => column.name === 'household_id')) {
+  db.exec('ALTER TABLE challenges ADD COLUMN household_id INTEGER REFERENCES households(id) ON DELETE CASCADE');
+}
 const challengeGoalColumns = db.prepare('PRAGMA table_info(challenge_goals)').all();
 if (!challengeGoalColumns.some((column) => column.name === 'custom_goals_json')) {
   db.exec('ALTER TABLE challenge_goals ADD COLUMN custom_goals_json TEXT');
@@ -283,11 +289,17 @@ const hasWorkflowStatusColumn = taskColumns.some((column) => column.name === 'wo
 if (!hasWorkflowStatusColumn) {
   db.exec("ALTER TABLE tasks ADD COLUMN workflow_status TEXT NOT NULL DEFAULT 'backlog'");
 }
+if (!taskColumns.some((column) => column.name === 'household_id')) {
+  db.exec('ALTER TABLE tasks ADD COLUMN household_id INTEGER REFERENCES households(id) ON DELETE CASCADE');
+}
 db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_personal ON tasks(is_personal)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_workflow_status ON tasks(workflow_status)');
 
 const projectColumns = db.prepare('PRAGMA table_info(projects)').all();
+if (!projectColumns.some((column) => column.name === 'household_id')) {
+  db.exec('ALTER TABLE projects ADD COLUMN household_id INTEGER REFERENCES households(id) ON DELETE CASCADE');
+}
 const hasIsArchivedColumn = projectColumns.some((column) => column.name === 'is_archived');
 if (!hasIsArchivedColumn) {
   db.exec('ALTER TABLE projects ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0');
@@ -329,6 +341,42 @@ if (usersWithoutHousehold.length > 0) {
   }
 }
 
+const defaultHouseholdId = db.prepare('SELECT id FROM households ORDER BY id LIMIT 1').get()?.id ?? null;
+db.prepare(`
+  UPDATE projects
+  SET household_id = COALESCE(
+    (SELECT household_id FROM users WHERE users.id = projects.created_by),
+    ?
+  )
+  WHERE household_id IS NULL
+`).run(defaultHouseholdId);
+db.prepare(`
+  UPDATE tasks
+  SET household_id = COALESCE(
+    (SELECT household_id FROM users WHERE users.id = tasks.created_by),
+    (SELECT household_id FROM projects WHERE projects.id = tasks.project_id),
+    ?
+  )
+  WHERE household_id IS NULL
+`).run(defaultHouseholdId);
+db.prepare(`
+  UPDATE challenges
+  SET household_id = COALESCE(
+    (SELECT household_id FROM users WHERE users.id = challenges.created_by),
+    ?
+  )
+  WHERE household_id IS NULL
+`).run(defaultHouseholdId);
+db.prepare(`
+  UPDATE tasks
+  SET project_id = NULL
+  WHERE project_id IS NOT NULL
+    AND household_id != (SELECT household_id FROM projects WHERE projects.id = tasks.project_id)
+`).run();
+db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_household ON tasks(household_id)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_projects_household ON projects(household_id)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_challenges_household ON challenges(household_id)');
+
 // Guarantee that each household has a head.
 const householdsWithoutHead = db.prepare('SELECT id FROM households WHERE head_user_id IS NULL').all();
 for (const household of householdsWithoutHead) {
@@ -346,8 +394,8 @@ saveDb();
 const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get();
 const shouldSeedDemo =
   userCount.count === 0 &&
-  (process.env.SEED_DEMO === 'true' ||
-    (process.env.SEED_DEMO !== 'false' && process.env.NODE_ENV !== 'production'));
+  process.env.NODE_ENV !== 'production' &&
+  process.env.SEED_DEMO !== 'false';
 
 if (shouldSeedDemo) {
   const bcrypt = (await import('bcryptjs')).default;
@@ -369,13 +417,13 @@ if (shouldSeedDemo) {
   db.prepare('UPDATE households SET head_user_id = ? WHERE id = ?').run(demoUserResult.lastInsertRowid, householdId);
 
   db.prepare(`
-    INSERT INTO tasks (title, description, task_type, default_stars, is_group_task) VALUES
-    ('Load dishwasher', 'Load and run the dishwasher', 'daily', 1, 0),
-    ('Unload dishwasher', 'Empty dishwasher and put away', 'daily', 1, 0),
-    ('Vacuum living room', 'Vacuum the main living area', 'weekly', 2, 0),
-    ('Take out trash', 'Take garbage to curb', 'weekly', 1, 0),
-    ('Team cleanup', 'Weekly household cleanup', 'weekly', 3, 1)
-  `).run();
+    INSERT INTO tasks (household_id, title, description, task_type, default_stars, is_group_task) VALUES
+    (?, 'Load dishwasher', 'Load and run the dishwasher', 'daily', 1, 0),
+    (?, 'Unload dishwasher', 'Empty dishwasher and put away', 'daily', 1, 0),
+    (?, 'Vacuum living room', 'Vacuum the main living area', 'weekly', 2, 0),
+    (?, 'Take out trash', 'Take garbage to curb', 'weekly', 1, 0),
+    (?, 'Team cleanup', 'Weekly household cleanup', 'weekly', 3, 1)
+  `).run(householdId, householdId, householdId, householdId, householdId);
   saveDb();
 }
 

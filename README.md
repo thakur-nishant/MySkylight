@@ -32,7 +32,7 @@ A household calendar and task management app inspired by Skylight Calendar. Mana
 - Client stores the token in `localStorage`
 - On app load, `AuthContext` calls `GET /api/auth/me` to restore the session
 - Unauthenticated users are redirected to `/login`
-- The head of household can invite members via `POST /api/household/invite`; invited accounts are created with the temporary password `Test@123` (override with `DEFAULT_MEMBER_PASSWORD`)
+- The head of household can invite members via `POST /api/household/invite`; each invited account receives a unique, randomly generated temporary password
 
 ### Existing databases
 
@@ -82,9 +82,8 @@ Backend (`server/server.js`, `server/auth.js`):
 - `JWT_SECRET`: token signing secret. Required when `NODE_ENV=production`; local development falls back to a known value.
 - `SERVER_ORIGIN`: public HTTPS origin, e.g. `https://myskylight.duckdns.org`. Used for Google Calendar OAuth callbacks.
 - `CORS_ORIGIN` (optional): comma-separated allowed origins (default `http://localhost:5173`). Same-origin deployments do not need to change this.
-- `DEFAULT_MEMBER_PASSWORD` (optional): temporary password for invited members (default `Test@123`). Set a strong value in production.
-- `ALLOW_REGISTRATION` (optional): set to `false` after creating your household to disable public registration (default `true`).
-- `SEED_DEMO` (optional): demo data is seeded only when the database is empty and `NODE_ENV` is not `production`. Set to `true` to force it or `false` to disable it.
+- `ALLOW_REGISTRATION` (optional): set to `true` to allow the initial household registration. Registration is disabled by default in production and closes automatically after the first account is created. In development it is enabled by default until the first account is created.
+- `SEED_DEMO` (optional): demo data is seeded only when the database is empty and `NODE_ENV` is not `production`. Set to `false` to disable demo seeding; production never seeds demo accounts.
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (optional): enable Google Calendar integration.
 
 Frontend: the client always calls the relative `/api` base. Vite proxies `/api` to the backend during development, and in production the same origin serves both the app and the API.
@@ -92,7 +91,7 @@ Frontend: the client always calls the relative `/api` base. Vite proxies `/api` 
 
 ## Demo credentials
 
-Demo data is only seeded in development (or with `SEED_DEMO=true`):
+Demo data is seeded only when the database is empty and `NODE_ENV` is not `production`:
 
 - Email: `demo@myskylight.app`
 - Password: `demo123`
