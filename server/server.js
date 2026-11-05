@@ -30,6 +30,10 @@ const VALID_TASK_TYPES = new Set(['daily', 'weekly', 'monthly', 'one-time', 'eve
 const ALLOW_REGISTRATION = process.env.ALLOW_REGISTRATION === 'true'
   || (process.env.NODE_ENV !== 'production' && process.env.ALLOW_REGISTRATION !== 'false');
 
+function hasAnyUser() {
+  return !!db.prepare('SELECT 1 FROM users LIMIT 1').get();
+}
+
 const USER_WITH_HOUSEHOLD_SELECT = `
   SELECT u.id, u.name, u.email, u.color, u.avatar, u.household_id, u.role, h.name as household_name
   FROM users u
@@ -86,9 +90,14 @@ function challengeParticipantsBelongToHousehold(participants, householdId) {
 }
 
 // Auth routes
+app.get('/api/auth/config', (req, res) => {
+  // Registration state changes as soon as the first account is created.
+  res.set('Cache-Control', 'no-store');
+  res.json({ registrationOpen: ALLOW_REGISTRATION && !hasAnyUser() });
+});
+
 app.post('/api/auth/register', (req, res) => {
-  const existingUser = db.prepare('SELECT 1 FROM users LIMIT 1').get();
-  if (!ALLOW_REGISTRATION || existingUser) {
+  if (!ALLOW_REGISTRATION || hasAnyUser()) {
     return res.status(403).json({
       error: 'Household registration is closed. Ask the head of your household for an invite.',
     });
