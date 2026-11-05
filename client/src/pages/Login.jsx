@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { auth as authApi } from '../api';
 
 // Demo credentials are only useful in local development.
 const DEMO_EMAIL = import.meta.env.DEV ? 'demo@myskylight.app' : '';
@@ -14,6 +15,7 @@ export default function Login() {
   const [color, setColor] = useState('#6366f1');
   const [error, setError] = useState('');
   const [isRegister, setIsRegister] = useState(false);
+  const [registrationOpen, setRegistrationOpen] = useState(false);
 
   const { user, loading, login, register } = useAuth();
   const navigate = useNavigate();
@@ -24,6 +26,24 @@ export default function Login() {
       navigate('/calendar', { replace: true });
     }
   }, [user, loading, navigate]);
+
+  // The create-household link is only useful before the first account exists.
+  useEffect(() => {
+    let cancelled = false;
+
+    authApi
+      .config()
+      .then((config) => {
+        if (!cancelled) setRegistrationOpen(!!config?.registrationOpen);
+      })
+      .catch(() => {
+        if (!cancelled) setRegistrationOpen(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const toggleMode = () => {
     const nextIsRegister = !isRegister;
@@ -146,16 +166,18 @@ export default function Login() {
               {isRegister ? 'Create household' : 'Sign in'}
             </button>
           </form>
-          <p className="mt-6 text-center text-slate-600">
-            {isRegister ? 'Already have a household?' : 'New to MySkylight?'}{' '}
-            <button
-              type="button"
-              onClick={toggleMode}
-              className="text-sky-600 font-medium hover:underline"
-            >
-              {isRegister ? 'Sign in' : 'Create household'}
-            </button>
-          </p>
+          {(registrationOpen || isRegister) && (
+            <p className="mt-6 text-center text-slate-600">
+              {isRegister ? 'Already have a household?' : 'New to MySkylight?'}{' '}
+              <button
+                type="button"
+                onClick={toggleMode}
+                className="text-sky-600 font-medium hover:underline"
+              >
+                {isRegister ? 'Sign in' : 'Create household'}
+              </button>
+            </p>
+          )}
         </div>
       </div>
     </div>

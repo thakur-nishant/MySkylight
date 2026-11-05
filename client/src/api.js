@@ -28,6 +28,7 @@ export async function api(endpoint, options = {}) {
 }
 
 export const auth = {
+  config: () => api('/auth/config'),
   login: (email, password) => api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   register: (data) => api('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
   me: () => api('/auth/me'),
