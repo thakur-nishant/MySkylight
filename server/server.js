@@ -91,6 +91,8 @@ function challengeParticipantsBelongToHousehold(participants, householdId) {
 
 // Auth routes
 app.get('/api/auth/config', (req, res) => {
+  // Registration state changes as soon as the first account is created.
+  res.set('Cache-Control', 'no-store');
   res.json({ registrationOpen: ALLOW_REGISTRATION && !hasAnyUser() });
 });
 
