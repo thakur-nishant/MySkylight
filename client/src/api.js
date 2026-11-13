@@ -182,3 +182,16 @@ export const challengeTracker = {
   saveEntry: (data) => api('/challenge-tracker/entries', { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id) => api(`/challenge-tracker/${id}`, { method: 'DELETE' }),
 };
+
+export const admin = {
+  overview: () => api('/admin/overview'),
+  households: () => api('/admin/households'),
+  household: (id) => api(`/admin/households/${id}`),
+  createHousehold: (data) => api('/admin/households', { method: 'POST', body: JSON.stringify(data) }),
+  updateHousehold: (id, data) => api(`/admin/households/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteHousehold: (id) => api(`/admin/households/${id}`, { method: 'DELETE' }),
+  addMember: (householdId, data) => api(`/admin/households/${householdId}/members`, { method: 'POST', body: JSON.stringify(data) }),
+  updateMember: (id, data) => api(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  resetMemberPassword: (id) => api(`/admin/users/${id}/reset-password`, { method: 'POST' }),
+  deleteMember: (id) => api(`/admin/users/${id}`, { method: 'DELETE' }),
+};

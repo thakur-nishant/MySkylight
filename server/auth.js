@@ -53,7 +53,7 @@ export function authMiddleware(req, res, next) {
   }
 
   const user = db.prepare(`
-    SELECT u.id, u.name, u.email, u.color, u.avatar, u.household_id, u.role, h.name as household_name
+    SELECT u.id, u.name, u.email, u.color, u.avatar, u.household_id, u.role, u.is_admin, h.name as household_name
     FROM users u
     LEFT JOIN households h ON h.id = u.household_id
     WHERE u.id = ?
@@ -62,6 +62,6 @@ export function authMiddleware(req, res, next) {
     return res.status(401).json({ error: 'User not found' });
   }
 
-  req.user = user;
+  req.user = { ...user, is_admin: !!user.is_admin };
   next();
 }

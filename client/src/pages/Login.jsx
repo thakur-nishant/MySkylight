@@ -23,7 +23,7 @@ export default function Login() {
   // If user is already logged in, redirect immediately
   useEffect(() => {
     if (!loading && user) {
-      navigate('/calendar', { replace: true });
+      navigate(user.is_admin ? '/admin' : '/calendar', { replace: true });
     }
   }, [user, loading, navigate]);
 

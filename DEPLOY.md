@@ -181,7 +181,25 @@ Projects, tasks, completions, insights, calendar events, and challenges are scop
 After that, the head of household can invite members from the **Household** page.
 If you previously deployed a version with a shared invitation password, have existing invited members change their passwords from their profiles.
 
-## 10. Migrate the existing database
+## 10. Create the platform admin
+
+The platform admin console lives at `/admin` and manages every household and member. Admin accounts are created from the server, so there is no public registration path for them.
+
+Stop the service while the account is written; the app keeps the database in memory and can overwrite changes made while it is running:
+
+```bash
+sudo systemctl stop myskylight
+sudo -u myskylight -H bash -c 'cd /opt/myskylight/app/server && NODE_ENV=production node create-admin.js admin@example.com "Administrator"'
+sudo systemctl restart myskylight
+```
+
+The command prints the email and a one-time generated password. Sign in at `https://yourname.duckdns.org/admin`, then use **Change password** to replace the temporary password.
+
+Running the command again for the same email issues a new password. Pass `--force` to convert an existing household member into the admin account; if that member was a household head, another member is promoted automatically.
+
+The admin account belongs to an internal `Platform Administration` household. It is hidden from the console and cannot be managed or deleted there. Platform admins do not count as household accounts, so registration still closes based on the first household account.
+
+## 11. Migrate the existing database
 
 If you are moving the current Termux deployment, copy its database before inviting anyone on the new server.
 
@@ -211,7 +229,7 @@ The app runs its schema migrations on startup. Log in with the existing accounts
 
 If you are starting fresh instead, skip this step. The app creates an empty database on first start in production; use **Create household** on the login page.
 
-## 11. Backups
+## 12. Backups
 
 ```bash
 cd /opt/myskylight/app
@@ -233,7 +251,7 @@ Add:
 
 Backups are written to `/var/backups/myskylight/` and verified with `PRAGMA integrity_check`. Copy them off the VM periodically; a backup on the same disk is not enough.
 
-## 12. Updating the app
+## 13. Updating the app
 
 ```bash
 cd /opt/myskylight/app
@@ -243,10 +261,11 @@ sudo -u myskylight -H npm run build
 sudo systemctl restart myskylight
 ```
 
-## 13. Production checklist
+## 14. Production checklist
 
 - [ ] `JWT_SECRET` is set to a random value.
 - [ ] `ALLOW_REGISTRATION=false` after your household exists (registration also closes automatically after the first account).
+- [ ] The platform admin password has been changed from the generated temporary password.
 - [ ] HTTPS works and HTTP redirects to HTTPS.
 - [ ] Oracle security list allows only 22 (your IP), 80, and 443.
 - [ ] SSH password login is disabled; use keys.
