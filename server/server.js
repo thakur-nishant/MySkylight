@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import db from './database.js';
 import { hashPassword, verifyPassword, createToken, authMiddleware } from './auth.js';
 import { registerAdminRoutes } from './admin.js';
+import { SYSTEM_CALENDARS, getEnabledCalendarIds, getSystemCalendarEvents } from './calendarSources.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.resolve(__dirname, '../client/dist');
@@ -1708,6 +1709,48 @@ app.get('/api/insights/overview', authMiddleware, (req, res) => {
   res.json({ totalCompletions: totalCompletions, totalStars, topTasks });
 });
 
+// System calendars (Hindu festivals, Panchang, ...) that can be overlaid on
+// the calendar. Toggles are stored per user and default to off.
+app.get('/api/calendar/sources', authMiddleware, (req, res) => {
+  const enabled = new Set(getEnabledCalendarIds(req.user.id, db));
+  const googleToken = db.prepare('SELECT 1 FROM google_tokens WHERE user_id = ?').get(req.user.id);
+
+  res.json({
+    sources: SYSTEM_CALENDARS.map(({ id, name, description, color, attribution }) => ({
+      id,
+      name,
+      description,
+      color,
+      attribution,
+      enabled: enabled.has(id),
+    })),
+    google: {
+      enabled: GOOGLE_ENABLED,
+      connected: !!googleToken,
+    },
+  });
+});
+
+app.patch('/api/calendar/sources/:id', authMiddleware, (req, res) => {
+  const source = SYSTEM_CALENDARS.find((calendar) => calendar.id === req.params.id);
+  if (!source) return res.status(404).json({ error: 'Unknown calendar' });
+
+  const { enabled } = req.body ?? {};
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'enabled must be a boolean' });
+  }
+
+  if (enabled) {
+    db.prepare('INSERT OR IGNORE INTO calendar_subscriptions (user_id, calendar_id) VALUES (?, ?)')
+      .run(req.user.id, source.id);
+  } else {
+    db.prepare('DELETE FROM calendar_subscriptions WHERE user_id = ? AND calendar_id = ?')
+      .run(req.user.id, source.id);
+  }
+
+  res.json({ ...source, enabled });
+});
+
 // Calendar events (combine tasks with due dates and completions for display)
 app.get('/api/calendar/events', authMiddleware, async (req, res) => {
   const { start, end } = req.query;
@@ -1729,6 +1772,14 @@ app.get('/api/calendar/events', authMiddleware, async (req, res) => {
     allDay: !!t.is_all_day,
     resource: { type: 'task', taskId: t.id, taskType: t.task_type, projectId: t.project_id, projectName: t.project_name }
   }));
+
+  // Merge events from the system calendars this user has enabled.
+  try {
+    const enabledCalendarIds = getEnabledCalendarIds(req.user.id, db);
+    events.push(...getSystemCalendarEvents(enabledCalendarIds, rangeStart, rangeEnd));
+  } catch (err) {
+    console.error('Failed to build system calendar events', err);
+  }
 
   // If user has connected Google, fetch their calendar events for the same range and merge
   try {
