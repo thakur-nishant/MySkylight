@@ -6,6 +6,7 @@ import GoogleCalendarIntegration from './GoogleCalendarIntegration';
 export default function CalendarImportModal({
   sources = [],
   google = { enabled: false, connected: false },
+  error = '',
   pendingId = null,
   onToggle,
   onClose,
@@ -83,6 +84,8 @@ export default function CalendarImportModal({
                 </div>
               ))}
             </div>
+
+            {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
           </section>
 
           <section>
