@@ -186,6 +186,17 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_habit_logs_habit ON habit_logs(habit_id);
   CREATE INDEX IF NOT EXISTS idx_habit_logs_date ON habit_logs(date);
 
+  -- System calendars a user has added to their calendar view. The row only
+  -- exists while the calendar is enabled, so new users default to "off".
+  CREATE TABLE IF NOT EXISTS calendar_subscriptions (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    calendar_id TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, calendar_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_calendar_subscriptions_user ON calendar_subscriptions(user_id);
+
   CREATE TABLE IF NOT EXISTS challenges (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     household_id INTEGER REFERENCES households(id) ON DELETE CASCADE,

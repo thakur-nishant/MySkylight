@@ -83,6 +83,8 @@ sudo -u myskylight -H npm run build
 
 `npm ci` installs the root, client, and server dependencies. The build produces `client/dist`, which the Express server serves directly.
 
+The server installs `astronomy-engine` for the optional Hindu festival and Panchang calendars. Those calendars are calculated locally and do not call an external service.
+
 ## 5. Configure the environment
 
 ```bash
@@ -225,7 +227,7 @@ sudo systemctl start myskylight
 sudo -u myskylight test -r /opt/myskylight/app/server/myskylight.db && echo "db readable"
 ```
 
-The app runs its schema migrations on startup. Log in with the existing accounts to confirm the household and members are intact.
+The app runs its schema migrations on startup. Existing data is preserved; the calendar import feature creates its `calendar_subscriptions` table automatically and defaults every system calendar to off. Log in with the existing accounts to confirm the household and members are intact.
 
 If you are starting fresh instead, skip this step. The app creates an empty database on first start in production; use **Create household** on the login page.
 

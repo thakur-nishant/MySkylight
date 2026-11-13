@@ -3,7 +3,6 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Calendar, ListTodo, BarChart3, LogOut, ChevronsLeft, ChevronsRight, ClipboardCheck, KanbanSquare, Trophy, Sun, Users } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
-import GoogleCalendarIntegration from './GoogleCalendarIntegration';
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -109,7 +108,6 @@ export default function Layout() {
             {!collapsed && <span>Sign out</span>}
           </button>
           <ThemeToggle compact={collapsed} />
-          {!collapsed && <div className="pt-1"><GoogleCalendarIntegration /></div>}
         </div>
       </aside>
 

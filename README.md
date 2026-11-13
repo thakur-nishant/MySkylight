@@ -10,6 +10,7 @@ A household calendar and task management app inspired by Skylight Calendar. Mana
 - Habit toggle persistence improved to avoid duplicate log rows and preserve checkbox state across refreshes
 - Frontend now uses protected routes with JWT session restore (`/api/auth/me`) on refresh
 - Insights view includes scoreboards, completion counts, and date-range summaries
+- Calendar page can import system calendars; Hindu festivals and daily Panchang are available with independent toggles (off by default)
 - Calendar feed endpoint is available for rendering task events in day/week/month views
 - Users now belong to a household; registration creates a household and makes the registering user its head
 - Heads of household can invite members from the Household page (accounts are created with a temporary password)
@@ -17,6 +18,7 @@ A household calendar and task management app inspired by Skylight Calendar. Mana
 ## Features
 
 - **Calendar view** – Day, week, and month views with task visibility
+- **Calendar imports** – Overlay Hindu festival and Panchang calendars, each with its own toggle (off by default), and import Google Calendar events
 - **Task management** – Create daily/weekly/monthly/one-time tasks and assign users
 - **Completion tracking** – Record completions, batch-complete, and mark items undone
 - **Personal Tracker** – Manage weekly personal tasks + habits with daily cards, charting, and completion rings
@@ -313,4 +315,8 @@ All endpoints below are under `http://localhost:3001`. Most routes require `Auth
 | GET | `/api/insights/scores` | User scores (optional date range) |
 | GET | `/api/insights/task-counts` | Completion counts per task/user |
 | GET | `/api/insights/overview` | Aggregate totals + top tasks |
-| GET | `/api/calendar/events` | Calendar-formatted task events |
+| GET | `/api/calendar/sources` | List system calendars and this user's toggle state |
+| PATCH | `/api/calendar/sources/:id` | Enable or disable a system calendar (`{ "enabled": true }`) |
+| GET | `/api/calendar/events` | Calendar-formatted task events plus enabled system calendars |
+
+System calendar toggles are stored per user and default to off. Hindu festival and Panchang dates are calculated locally for Delhi, India (IST) using the MIT-licensed [`india-festival-dates`](https://github.com/paperdropio/india-festival-dates) library (vendored under `server/vendor/india-festival-dates`). No external calendar API is called.

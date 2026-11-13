@@ -151,6 +151,12 @@ export const calendar = {
     );
     return Array.isArray(data) ? data : [];
   },
+  sources: () => api('/calendar/sources'),
+  updateSource: (id, enabled) =>
+    api(`/calendar/sources/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
 };
 
 export const integrations = {
