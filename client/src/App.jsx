@@ -13,19 +13,36 @@ import ChallengeTrackerPage from './pages/ChallengeTrackerPage';
 import TodayPage from './pages/TodayPage';
 import HouseholdPage from './pages/HouseholdPage';
 import ProfilePage from './pages/ProfilePage';
+import AdminPage from './pages/AdminPage';
+
+function LoadingScreen() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
+      <div className="animate-spin w-10 h-10 border-2 border-sky-500 border-t-transparent rounded-full" />
+    </div>
+  );
+}
 
 function ProtectedRoute({ children }) {
-  const { isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="animate-spin w-10 h-10 border-2 border-sky-500 border-t-transparent rounded-full" />
-      </div>
-    );
-  }
+  if (loading) return <LoadingScreen />;
 
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+
+  if (user?.is_admin) return <Navigate to="/admin" replace />;
+
+  return children;
+}
+
+function AdminRoute({ children }) {
+  const { user, isAuthenticated, loading } = useAuth();
+
+  if (loading) return <LoadingScreen />;
+
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+
+  if (!user?.is_admin) return <Navigate to="/calendar" replace />;
 
   return children;
 }
@@ -35,6 +52,14 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route
+        path="/admin"
+        element={
+          <AdminRoute>
+            <AdminPage />
+          </AdminRoute>
+        }
+      />
       <Route
         path="/"
         element={

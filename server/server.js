@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'url';
 import db from './database.js';
 import { hashPassword, verifyPassword, createToken, authMiddleware } from './auth.js';
+import { registerAdminRoutes } from './admin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.resolve(__dirname, '../client/dist');
@@ -31,11 +32,13 @@ const ALLOW_REGISTRATION = process.env.ALLOW_REGISTRATION === 'true'
   || (process.env.NODE_ENV !== 'production' && process.env.ALLOW_REGISTRATION !== 'false');
 
 function hasAnyUser() {
-  return !!db.prepare('SELECT 1 FROM users LIMIT 1').get();
+  // Platform admins do not count as a household account.
+  return !!db.prepare('SELECT 1 FROM users WHERE is_admin = 0 LIMIT 1').get();
 }
 
 const USER_WITH_HOUSEHOLD_SELECT = `
-  SELECT u.id, u.name, u.email, u.color, u.avatar, u.household_id, u.role, h.name as household_name
+  SELECT u.id, u.name, u.email, u.color, u.avatar, u.household_id, u.role, u.is_admin,
+    h.name as household_name
   FROM users u
   LEFT JOIN households h ON h.id = u.household_id
 `;
@@ -50,6 +53,7 @@ function toPublicUser(user) {
     household_id: user.household_id,
     household_name: user.household_name,
     role: user.role,
+    is_admin: !!user.is_admin,
   };
 }
 
@@ -88,6 +92,8 @@ function challengeParticipantsBelongToHousehold(participants, householdId) {
   `).get(householdId, ...emails);
   return result.count === emails.length;
 }
+
+registerAdminRoutes(app);
 
 // Auth routes
 app.get('/api/auth/config', (req, res) => {

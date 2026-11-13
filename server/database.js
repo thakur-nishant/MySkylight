@@ -82,6 +82,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     head_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    is_system INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -94,6 +95,7 @@ db.exec(`
     avatar TEXT,
     household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
     role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('head', 'member')),
+    is_admin INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -257,6 +259,11 @@ if (!challengeEntryColumns.some((column) => column.name === 'custom_values_json'
   db.exec('ALTER TABLE challenge_daily_entries ADD COLUMN custom_values_json TEXT');
 }
 
+const householdColumns = db.prepare('PRAGMA table_info(households)').all();
+if (!householdColumns.some((column) => column.name === 'is_system')) {
+  db.exec('ALTER TABLE households ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0');
+}
+
 const userColumns = db.prepare('PRAGMA table_info(users)').all();
 const hasColorColumn = userColumns.some((column) => column.name === 'color');
 if (!hasColorColumn) {
@@ -274,7 +281,12 @@ const hasRoleColumn = userColumns.some((column) => column.name === 'role');
 if (!hasRoleColumn) {
   db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member'");
 }
+if (!userColumns.some((column) => column.name === 'is_admin')) {
+  db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
+}
 db.exec('CREATE INDEX IF NOT EXISTS idx_users_household ON users(household_id)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_users_is_admin ON users(is_admin)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_households_is_system ON households(is_system)');
 
 const taskColumns = db.prepare('PRAGMA table_info(tasks)').all();
 const hasIsPersonalColumn = taskColumns.some((column) => column.name === 'is_personal');
@@ -323,7 +335,10 @@ const usersWithoutHousehold = db.prepare(`
   SELECT id FROM users WHERE household_id IS NULL ORDER BY id
 `).all();
 if (usersWithoutHousehold.length > 0) {
-  let defaultHousehold = db.prepare('SELECT id, head_user_id FROM households ORDER BY id LIMIT 1').get();
+  let defaultHousehold = db.prepare('SELECT id, head_user_id FROM households WHERE is_system = 0 ORDER BY id LIMIT 1').get();
+  if (!defaultHousehold) {
+    defaultHousehold = db.prepare('SELECT id, head_user_id FROM households ORDER BY id LIMIT 1').get();
+  }
   if (!defaultHousehold) {
     const result = db.prepare('INSERT INTO households (name) VALUES (?)').run('MySkylight Household');
     defaultHousehold = { id: result.lastInsertRowid, head_user_id: null };
@@ -341,7 +356,9 @@ if (usersWithoutHousehold.length > 0) {
   }
 }
 
-const defaultHouseholdId = db.prepare('SELECT id FROM households ORDER BY id LIMIT 1').get()?.id ?? null;
+const defaultHouseholdId = db.prepare('SELECT id FROM households WHERE is_system = 0 ORDER BY id LIMIT 1').get()?.id
+  ?? db.prepare('SELECT id FROM households ORDER BY id LIMIT 1').get()?.id
+  ?? null;
 db.prepare(`
   UPDATE projects
   SET household_id = COALESCE(
