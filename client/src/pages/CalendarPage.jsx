@@ -25,7 +25,6 @@ import {
 } from '../api';
 import CompleteTaskModal from '../components/CompleteTaskModal';
 import TaskModal from '../components/TaskModal';
-import CalendarSourcesPanel from '../components/CalendarSourcesPanel';
 import CalendarImportModal from '../components/CalendarImportModal';
 import { CalendarPlus, CheckCircle, Circle, Download, X } from 'lucide-react';
 import { toPST, todayPST, formatDatePST, zonedTimeToUtc } from '../utils/dateUtils';
@@ -195,7 +194,6 @@ export default function CalendarPage() {
 
   const {
     data: sourcesData,
-    loading: sourcesLoading,
     error: sourcesFetchError,
     refetch: refetchSources,
   } = useQuery(['calendar-sources'], fetchSources);
@@ -464,36 +462,25 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      {/* Calendar + calendar sources */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <Calendar
-            localizer={localizer}
-            events={events}
-            startAccessor="start"
-            endAccessor="end"
-            style={{ height: 500 }}
-            eventPropGetter={eventPropGetter}
-            onSelectEvent={handleSelectEvent}
-            onNavigate={(date) => setCurrentDate(toPST(date))}
-            onRangeChange={handleRangeChange}
-            onSelectSlot={(slotInfo) => {
-              setSelectedTask(null);
-              setSelectedSystemEvent(null);
-              setModalDate(slotInfo.start);
-              setShowTaskModal(true);
-            }}
-            selectable
-          />
-        </div>
-
-        <CalendarSourcesPanel
-          sources={sources}
-          loading={sourcesLoading}
-          error={sourcesError || (sourcesFetchError ? 'Failed to load calendars' : '')}
-          pendingId={sourcePendingId}
-          onToggle={handleToggleSource}
-          onImport={() => setShowImportModal(true)}
+      {/* Calendar */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <Calendar
+          localizer={localizer}
+          events={events}
+          startAccessor="start"
+          endAccessor="end"
+          style={{ height: 500 }}
+          eventPropGetter={eventPropGetter}
+          onSelectEvent={handleSelectEvent}
+          onNavigate={(date) => setCurrentDate(toPST(date))}
+          onRangeChange={handleRangeChange}
+          onSelectSlot={(slotInfo) => {
+            setSelectedTask(null);
+            setSelectedSystemEvent(null);
+            setModalDate(slotInfo.start);
+            setShowTaskModal(true);
+          }}
+          selectable
         />
       </div>
 
@@ -550,6 +537,7 @@ export default function CalendarPage() {
         <CalendarImportModal
           sources={sources}
           google={google}
+          error={sourcesError || (sourcesFetchError ? 'Failed to load calendars.' : '')}
           pendingId={sourcePendingId}
           onToggle={handleToggleSource}
           onClose={() => setShowImportModal(false)}
